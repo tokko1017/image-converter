@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>画像変換ツール 使い方ガイド</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Yu Gothic UI", "Meiryo", sans-serif;
+      background: #f4f5f7;
+      color: #2d2d2d;
+      padding: 32px 16px;
+      line-height: 1.8;
+    }
+    .container { max-width: 780px; margin: 0 auto; }
+
+    h1 {
+      font-size: 1.7rem;
+      color: #5a4fcf;
+      border-left: 6px solid #7c6af7;
+      padding-left: 14px;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      color: #888;
+      font-size: 0.9rem;
+      margin-bottom: 32px;
+      padding-left: 20px;
+    }
+
+    h2 {
+      font-size: 1.15rem;
+      color: #fff;
+      background: #7c6af7;
+      padding: 8px 16px;
+      border-radius: 6px 6px 0 0;
+      margin-top: 32px;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+      padding: 20px 24px;
+      margin-bottom: 8px;
+    }
+
+    /* steps */
+    .steps { counter-reset: step; list-style: none; padding: 0; }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 16px;
+      margin-bottom: 18px;
+      align-items: flex-start;
+    }
+    .steps li::before {
+      content: counter(step);
+      flex-shrink: 0;
+      width: 30px; height: 30px;
+      background: #7c6af7;
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 0.9rem;
+      margin-top: 2px;
+    }
+    .steps li .text strong { display: block; margin-bottom: 2px; }
+    .steps li .text span { color: #555; font-size: 0.92rem; }
+
+    /* format table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.93rem;
+    }
+    th {
+      background: #f0eeff;
+      color: #5a4fcf;
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 2px solid #c4baff;
+    }
+    td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #eee;
+    }
+    tr:last-child td { border-bottom: none; }
+    .tag {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
+    .tag.yes  { background: #d1fae5; color: #065f46; }
+    .tag.no   { background: #fee2e2; color: #991b1b; }
+    .tag.q    { background: #e0e7ff; color: #3730a3; }
+
+    /* caution */
+    .caution-list { list-style: none; padding: 0; }
+    .caution-list li {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      align-items: flex-start;
+    }
+    .icon {
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: bold;
+    }
+    .icon.warn  { background: #fef3c7; color: #b45309; border: 1.5px solid #fcd34d; }
+    .icon.info  { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
+    .caution-list li .text strong { display: block; font-size: 0.95rem; }
+    .caution-list li .text span { color: #555; font-size: 0.9rem; }
+
+    /* screen block */
+    .screen {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      border-radius: 8px;
+      padding: 16px 20px;
+      font-family: "Consolas", monospace;
+      font-size: 0.88rem;
+      margin: 12px 0;
+      line-height: 2;
+    }
+    .screen .label { color: #7c6af7; font-weight: bold; margin-right: 8px; }
+    .screen .val   { color: #a6e3a1; }
+    .screen .dim   { color: #6c7086; }
+
+    footer {
+      text-align: center;
+      color: #aaa;
+      font-size: 0.82rem;
+      margin-top: 40px;
+      padding-top: 16px;
+      border-top: 1px solid #ddd;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <h1>画像変換ツール</h1>
+  <p class="subtitle">使い方ガイド &nbsp;|&nbsp; HEIC・JPEG・PNG・WebP などの画像形式を変換するツールです</p>
+
+  <!-- ① 起動方法 -->
+  <h2>① 起動方法</h2>
+  <div class="card">
+    <ol class="steps">
+      <li>
+        <div class="text">
+          <strong>「画像変換ツール.exe」をダブルクリックします</strong>
+          <span>アプリが起動し、変換ウィンドウが表示されます。</span>
+        </div>
+      </li>
+      <li>
+        <div class="text">
+          <strong>「WindowsによってPCが保護されました」という画面が出た場合</strong>
+          <span>「詳細情報」→「実行」の順にクリックしてください。<br>
+          このツールは安全ですが、配布元が未登録のため Windows が警告を表示することがあります。</span>
+        </div>
+      </li>
+    </ol>
+  </div>
+
+  <!-- ② 基本的な使い方 -->
+  <h2>② 基本的な使い方</h2>
+  <div class="card">
+    <ol class="steps">
+      <li>
+        <div class="text">
+          <strong>変換したいファイルを追加する</strong>
+          <span>「ファイル追加」ボタンで1枚ずつ選ぶか、「フォルダ追加」でフォルダ内の画像をまとめて追加できます。</span>
+        </div>
+      </li>
+      <li>
+        <div class="text">
+          <strong>変換形式を選ぶ</strong>
+          <span>ドロップダウンから出力したい形式（JPEG・PNG・WebP など）を選択します。</span>
+        </div>
+      </li>
+      <li>
+        <div class="text">
+          <strong>出力先フォルダを指定する（任意）</strong>
+          <span>「選択」ボタンで保存先フォルダを指定できます。<br>
+          空欄のままにすると、<strong>元のファイルと同じフォルダ</strong>に保存されます。</span>
+        </div>
+      </li>
+      <li>
+        <div class="text">
+          <strong>品質を調整する（任意）</strong>
+          <span>JPEG・WebP 形式のときのみ有効です。数値が高いほど高画質・大容量になります。<br>
+          デフォルトの 85% が画質とファイルサイズのバランスが良い設定です。</span>
+        </div>
+      </li>
+      <li>
+        <div class="text">
+          <strong>「変換開始」ボタンをクリック</strong>
+          <span>進捗バーが進み、各ファイルの状態が「完了」または「失敗」と表示されます。</span>
+        </div>
+      </li>
+    </ol>
+
+    <div class="screen">
+      <div><span class="label">出力先を指定した場合</span><span class="val">指定フォルダ / photo01.jpg</span></div>
+      <div><span class="label">出力先を空欄にした場合</span><span class="val">元ファイルと同じフォルダ / photo01.jpg</span></div>
+    </div>
+  </div>
+
+  <!-- ③ 対応形式 -->
+  <h2>③ 対応している形式</h2>
+  <div class="card">
+    <p style="margin-bottom:14px; font-size:0.93rem; color:#555;">
+      以下の形式を入力・出力に使用できます。同じ形式同士の変換（例：JPEG → JPEG）も可能です。
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>形式</th>
+          <th>透過（背景なし）</th>
+          <th>品質設定</th>
+          <th>主な用途</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>JPEG</strong></td>
+          <td><span class="tag no">なし</span></td>
+          <td><span class="tag q">あり</span></td>
+          <td>写真・一般的な画像</td>
+        </tr>
+        <tr>
+          <td><strong>PNG</strong></td>
+          <td><span class="tag yes">あり</span></td>
+          <td>—</td>
+          <td>スクリーンショット・ロゴ</td>
+        </tr>
+        <tr>
+          <td><strong>WebP</strong></td>
+          <td><span class="tag yes">あり</span></td>
+          <td><span class="tag q">あり</span></td>
+          <td>Web向け・高圧縮</td>
+        </tr>
+        <tr>
+          <td><strong>BMP</strong></td>
+          <td><span class="tag no">なし</span></td>
+          <td>—</td>
+          <td>無圧縮・高互換性</td>
+        </tr>
+        <tr>
+          <td><strong>TIFF</strong></td>
+          <td><span class="tag yes">あり</span></td>
+          <td>—</td>
+          <td>印刷・業務用途</td>
+        </tr>
+        <tr>
+          <td><strong>HEIC / HEIF</strong></td>
+          <td>—</td>
+          <td>—</td>
+          <td>iPhone の写真形式（入力のみ）</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ④ 注意事項 -->
+  <h2>④ 注意事項</h2>
+  <div class="card">
+    <ul class="caution-list">
+      <li>
+        <div class="icon warn">!</div>
+        <div class="text">
+          <strong>元のファイルは削除・上書きされません</strong>
+          <span>変換後も元の画像はそのまま残ります。安心して変換してください。</span>
+        </div>
+      </li>
+      <li>
+        <div class="icon warn">!</div>
+        <div class="text">
+          <strong>PNG → JPEG に変換すると透過部分が白くなります</strong>
+          <span>JPEG は透過に対応していないため、透明な部分は自動的に白色の背景に変換されます。</span>
+        </div>
+      </li>
+      <li>
+        <div class="icon warn">!</div>
+        <div class="text">
+          <strong>出力先フォルダに同名ファイルがある場合は上書きされます</strong>
+          <span>例：変換先に「photo01.jpg」が既にある場合、新しいファイルで上書きされます。<br>
+          重要なファイルは事前にバックアップを取っておくことをお勧めします。</span>
+        </div>
+      </li>
+      <li>
+        <div class="icon info">i</div>
+        <div class="text">
+          <strong>JPEG の品質は 85% がおすすめです</strong>
+          <span>100% は見た目の差がほぼなくファイルサイズだけ大きくなります。<br>
+          SNS 投稿用なら 80〜85%、印刷用なら 90〜95% が目安です。</span>
+        </div>
+      </li>
+      <li>
+        <div class="icon info">i</div>
+        <div class="text">
+          <strong>フォルダ追加はサブフォルダも含めて検索します</strong>
+          <span>フォルダ内に複数階層がある場合も、すべての画像ファイルを自動で見つけます。</span>
+        </div>
+      </li>
+      <li>
+        <div class="icon info">i</div>
+        <div class="text">
+          <strong>変換中はアプリを閉じないでください</strong>
+          <span>進捗バーが完了するまでウィンドウを開いたままにしておいてください。</span>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+  <footer>
+    画像変換ツール &nbsp;|&nbsp; 不明点はツール配布元にお問い合わせください
+  </footer>
+
+</div>
+</body>
+</html>
