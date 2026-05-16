@@ -8,7 +8,7 @@ from pathlib import Path
 pillow_heif.register_heif_opener()
 
 # ── パスワード保護 ────────────────────────────────────────────────────────────
-PASSWORD = "111222333"
+PASSWORD = st.secrets["password"]
 
 def check_password():
     if st.session_state.get("authenticated"):
