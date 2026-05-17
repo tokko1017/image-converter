@@ -7,6 +7,12 @@ from pathlib import Path
 
 pillow_heif.register_heif_opener()
 
+st.set_page_config(
+    page_title="画像変換ツール",
+    page_icon="🖼️",
+    layout="centered",
+)
+
 # ── パスワード保護 ────────────────────────────────────────────────────────────
 PASSWORD = st.secrets["password"]
 
@@ -37,12 +43,6 @@ OUTPUT_FORMATS = {
 }
 
 ACCEPT_TYPES = ["heic", "heif", "jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif"]
-
-st.set_page_config(
-    page_title="画像変換ツール",
-    page_icon="🖼️",
-    layout="centered",
-)
 
 st.markdown("""
 <style>
