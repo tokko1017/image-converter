@@ -8,7 +8,7 @@ from pathlib import Path
 pillow_heif.register_heif_opener()
 
 st.set_page_config(
-    page_title="画像変換ツール",
+    page_title="写真変換ツール",
     page_icon="🖼️",
     layout="centered",
 )
