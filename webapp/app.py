@@ -141,6 +141,11 @@ if st.button("変換開始", type="primary"):
             else:
                 img_out = img
 
+            if not info["alpha"] and img_out.mode not in ("RGB", "L"):
+                img_out = img_out.convert("RGB")
+            elif info["alpha"] and img_out.mode not in ("RGB", "RGBA", "L", "LA"):
+                img_out = img_out.convert("RGBA")
+
             buf = io.BytesIO()
             save_kwargs = {}
             if info["has_quality"]:

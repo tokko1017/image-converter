@@ -309,6 +309,11 @@ class ConverterApp(tk.Tk):
                     else:
                         img_out = img.convert("RGBA") if info["alpha"] and img.mode == "P" else img
 
+                    if not info["alpha"] and img_out.mode not in ("RGB", "L"):
+                        img_out = img_out.convert("RGB")
+                    elif info["alpha"] and img_out.mode not in ("RGB", "RGBA", "L", "LA"):
+                        img_out = img_out.convert("RGBA")
+
                     save_kwargs = {}
                     if info["has_quality"]:
                         save_kwargs["quality"] = quality
