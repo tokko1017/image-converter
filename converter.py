@@ -8,12 +8,13 @@ import pillow_heif
 
 pillow_heif.register_heif_opener()
 
-SUPPORTED_EXTS = {".heic", ".heif", ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
+SUPPORTED_EXTS = {".heic", ".heif", ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif", ".avif"}
 
 OUTPUT_FORMATS = {
     "JPEG": {"ext": ".jpg",  "pil": "JPEG", "alpha": False, "has_quality": True},
     "PNG":  {"ext": ".png",  "pil": "PNG",  "alpha": True,  "has_quality": False},
     "WebP": {"ext": ".webp", "pil": "WEBP", "alpha": True,  "has_quality": True},
+    "AVIF": {"ext": ".avif", "pil": "AVIF", "alpha": True,  "has_quality": True},
     "BMP":  {"ext": ".bmp",  "pil": "BMP",  "alpha": False, "has_quality": False},
     "TIFF": {"ext": ".tif",  "pil": "TIFF", "alpha": True,  "has_quality": False},
 }
@@ -29,7 +30,7 @@ ERROR = "#f38ba8"
 WARN = "#f9e2af"
 
 FILETYPES = [
-    ("対応画像ファイル", "*.heic *.HEIC *.heif *.HEIF *.jpg *.jpeg *.JPG *.JPEG *.png *.PNG *.webp *.WEBP *.bmp *.BMP *.tiff *.tif"),
+    ("対応画像ファイル", "*.heic *.HEIC *.heif *.HEIF *.jpg *.jpeg *.JPG *.JPEG *.png *.PNG *.webp *.WEBP *.avif *.AVIF *.bmp *.BMP *.tiff *.tif"),
     ("HEIC/HEIF", "*.heic *.HEIC *.heif *.HEIF"),
     ("JPEG", "*.jpg *.jpeg *.JPG *.JPEG"),
     ("PNG", "*.png *.PNG"),
