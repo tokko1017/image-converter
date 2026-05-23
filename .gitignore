@@ -1,6 +1,8 @@
 dist/
+build/
 __pycache__/
 *.exe
 *.zip
 *.pyc
+*.spec
 .env
