@@ -817,63 +817,39 @@ with tab_sns:
 
 # ── 文字消し ──────────────────────────────────────────────────────────────────
 with tab_erase:
-    import base64 as _b64mod, json as _json
+    import base64 as _b64mod
     import streamlit_drawable_canvas as _sdc_mod
     import cv2
     import numpy as np
     from PIL import ImageDraw
 
-    # _component_func を直接呼ぶことで st.image.image_to_url を完全にスキップする
-    _canvas_fn = _sdc_mod.st_canvas.__globals__.get("_component_func")
-
-    def _draw_canvas(*, stroke_width, stroke_color, background_image,
-                     background_color, height, width, key):
-        """st_canvas の代替: background_image を base64 に変換して直接 component に渡す。"""
-        bg_url = ""
-        if background_image is not None:
+    # ── st_canvas 内の "st" 変数を差し替えて image_to_url を動かす ────────────
+    # Streamlit 1.28+ では st.image がメソッドになり .image_to_url が消えた。
+    # sys.modules['streamlit'] ではなく st_canvas の __globals__['st'] を
+    # 直接書き換えることで確実にパッチを当てる。
+    class _CanvasImgHelper:
+        def image_to_url(self, img, *args, **kwargs):
             _buf = io.BytesIO()
-            if hasattr(background_image, "save"):
-                background_image.save(_buf, format="PNG")
+            if hasattr(img, "save"):
+                img.save(_buf, format="JPEG", quality=85)
             _buf.seek(0)
-            bg_url = "data:image/png;base64," + _b64mod.b64encode(_buf.getvalue()).decode()
+            return "data:image/jpeg;base64," + _b64mod.b64encode(_buf.getvalue()).decode()
+        def __call__(self, *a, **k):
+            return st.image(*a, **k)
+        def __getattr__(self, n):
+            return getattr(st, n)
 
-        if _canvas_fn is None:
-            # フォールバック: background_image なしで呼ぶ
-            from streamlit_drawable_canvas import st_canvas as _sc
-            return _sc(stroke_width=stroke_width, stroke_color=stroke_color,
-                       background_color=background_color, drawing_mode="freedraw",
-                       update_streamlit=True, height=height, width=width, key=key)
+    class _CanvasPatchedSt:
+        _canvas_patched = True
+        image = _CanvasImgHelper()
+        def __getattr__(self, name):
+            return getattr(st, name)
 
-        raw = _canvas_fn(
-            fillColor="rgba(255,165,0,0.3)",
-            strokeWidth=stroke_width,
-            strokeColor=stroke_color,
-            backgroundColor=background_color,
-            backgroundImageURL=bg_url,
-            realtimeUpdateStreamlit=True,
-            canvasWidth=width,
-            canvasHeight=height,
-            drawingMode="freedraw",
-            initialDrawing=_json.dumps({"version": "4.4.0", "objects": []}),
-            displayToolbar=True,
-            displayRadius=3,
-            key=key,
-            default=None,
-        )
+    _cg = _sdc_mod.st_canvas.__globals__
+    if not getattr(_cg.get("st"), "_canvas_patched", False):
+        _cg["st"] = _CanvasPatchedSt()
 
-        blank = np.zeros((height, width, 4), dtype=np.uint8)
-        if raw is None:
-            return _sdc_mod.CanvasResult(blank, {"version": "4.4.0", "objects": []})
-        img_data = blank
-        raw_data = raw.get("data")
-        if raw_data is not None:
-            try:
-                arr = np.asarray(raw_data).ravel().astype(np.uint8)
-                if arr.size == height * width * 4:
-                    img_data = arr.reshape((height, width, 4))
-            except Exception:
-                pass
-        return _sdc_mod.CanvasResult(img_data, raw.get("jsonData"))
+    from streamlit_drawable_canvas import st_canvas
 
     ERASE_INPUT = ["jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif"]
 
@@ -929,55 +905,25 @@ with tab_erase:
                                   help="値が大きいほど広範囲を参照して補完します",
                                   key="erase_radius")
 
-        # ── ライブプレビュー（なぞった箇所を赤く表示） ──────────────────────
-        preview_ph = st.empty()
-
         st.markdown(
             "<p style='color:#7c3aed;font-size:0.88rem;margin:6px 0 2px;'>"
-            "📌 <strong>下の白いキャンバス</strong>で消したい部分をなぞると、"
-            "上の画像に<strong style='color:#e11d48;'>赤く</strong>反映されます。</p>",
+            "📌 画像の上で<strong>消したい部分を赤くなぞって</strong>から「消去する」を押してください。</p>",
             unsafe_allow_html=True)
 
         if "erase_reset" not in st.session_state:
             st.session_state["erase_reset"] = 0
 
-        canvas_result = _draw_canvas(
+        canvas_result = st_canvas(
             stroke_width=brush_size,
             stroke_color="rgba(255, 0, 0, 0.85)",
-            background_image=None,
-            background_color="#ffffff",
+            background_image=disp_img,
+            background_color="",
+            drawing_mode="freedraw",
+            update_streamlit=True,
             height=disp_h,
             width=disp_w,
             key=f"erase_canvas_{st.session_state['erase_reset']}",
         )
-
-        # json_data のストロークを disp_img に重ねてプレビュー更新
-        objects = (canvas_result.json_data or {}).get("objects", [])
-        if objects:
-            _ov = Image.new("RGBA", (disp_w, disp_h), (0, 0, 0, 0))
-            _dov = ImageDraw.Draw(_ov)
-            for _obj in objects:
-                if _obj.get("type") != "path":
-                    continue
-                _sw = max(1, int(_obj.get("strokeWidth", brush_size)))
-                _pts = []
-                for _cmd in _obj.get("path", []):
-                    if _cmd[0] in ("M", "L"):
-                        _pts.append((_cmd[1], _cmd[2]))
-                    elif _cmd[0] == "Q":
-                        _pts.append((_cmd[3], _cmd[4]))
-                    elif _cmd[0] == "C":
-                        _pts.append((_cmd[5], _cmd[6]))
-                if len(_pts) >= 2:
-                    _dov.line(_pts, fill=(220, 30, 30, 190), width=_sw)
-                elif len(_pts) == 1:
-                    _r = _sw // 2
-                    _x, _y = _pts[0]
-                    _dov.ellipse([_x-_r, _y-_r, _x+_r, _y+_r], fill=(220, 30, 30, 190))
-            _comp = Image.alpha_composite(disp_img.convert("RGBA"), _ov).convert("RGB")
-            preview_ph.image(_comp, caption="🔴 赤い部分が消去されます", width=disp_w)
-        else:
-            preview_ph.image(disp_img, caption="↑ なぞった箇所がここに赤く表示されます", width=disp_w)
 
         col_btn, col_reset = st.columns([3, 1])
         with col_reset:
