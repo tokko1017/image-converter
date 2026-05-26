@@ -877,8 +877,15 @@ with tab_erase:
                                   key="erase_radius")
 
         st.markdown(
-            "<p style='color:#7c3aed;font-size:0.88rem;margin:6px 0 4px;'>"
-            "🖌️ 消したい部分を赤くなぞってください。なぞり終わったら「消去する」を押してください。</p>",
+            "<p style='color:#7c3aed;font-size:0.88rem;margin:6px 0 2px;'>"
+            "📌 上の画像を見ながら、<strong>下の黒いキャンバスの同じ位置</strong>を白くなぞってください。</p>",
+            unsafe_allow_html=True)
+
+        st.image(disp_img, width=disp_w)
+
+        st.markdown(
+            "<p style='color:#6d28d9;font-size:0.85rem;margin:6px 0 2px;'>"
+            "⬇️ ここに消去したい部分をなぞる（白くなった部分が消去されます）</p>",
             unsafe_allow_html=True)
 
         if "erase_reset" not in st.session_state:
@@ -886,8 +893,8 @@ with tab_erase:
 
         canvas_result = st_canvas(
             stroke_width=brush_size,
-            stroke_color="rgba(255, 0, 0, 0.85)",
-            background_image=disp_img,
+            stroke_color="white",
+            background_color="black",
             drawing_mode="freedraw",
             update_streamlit=True,
             height=disp_h,
@@ -913,24 +920,14 @@ with tab_erase:
                 st.warning("消去する範囲をなぞってから「消去する」を押してください。")
             else:
                 with st.spinner("消去中..."):
-                    # json_data のパスデータからマスクを生成
-                    mask_img = Image.new("L", (disp_w, disp_h), 0)
-                    mask_draw = ImageDraw.Draw(mask_img)
-                    for obj in canvas_result.json_data["objects"]:
-                        if obj.get("type") != "path":
-                            continue
-                        sw = max(1, round(obj.get("strokeWidth", brush_size)))
-                        pts = []
-                        for cmd in obj.get("path", []):
-                            if cmd[0] in ("M", "L") and len(cmd) >= 3:
-                                pts.append((cmd[1], cmd[2]))
-                            elif cmd[0] == "Q" and len(cmd) >= 5:
-                                pts.append((cmd[3], cmd[4]))
-                        for i in range(len(pts) - 1):
-                            mask_draw.line([pts[i], pts[i+1]], fill=255, width=sw)
-                        for x, y in pts:
-                            r = sw // 2
-                            mask_draw.ellipse([x-r, y-r, x+r, y+r], fill=255)
+                    # canvas の image_data から白い部分をマスクとして抽出
+                    canvas_arr = canvas_result.image_data  # RGBA
+                    mask_display = (
+                        (canvas_arr[:, :, 0] > 150) |
+                        (canvas_arr[:, :, 1] > 150) |
+                        (canvas_arr[:, :, 2] > 150)
+                    ).astype(np.uint8) * 255
+                    mask_img = Image.fromarray(mask_display)
 
                     # 元サイズにスケール
                     mask_orig = mask_img.resize((orig_w, orig_h), Image.NEAREST)
