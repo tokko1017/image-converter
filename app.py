@@ -206,6 +206,24 @@ with tab_img:
              "ダウンロードボタンから保存する"],
             "HEIC / HEIF / JPEG / PNG / WebP / AVIF / BMP / TIFF"
         )
+        st.markdown("""
+        <div style="background:#f3e8ff;border-radius:14px;padding:16px;margin-top:12px;border:1.5px solid #ddd6fe;">
+          <p style="color:#7c3aed;font-weight:700;margin:0 0 10px;">📊 変換できる組み合わせ</p>
+          <p style="color:#6d28d9;font-size:0.85rem;margin:0 0 8px;">すべての入力形式から、すべての出力形式へ変換できます。</p>
+          <table style="width:100%;border-collapse:collapse;font-size:0.88rem;color:#4c1d95;">
+            <tr style="background:#ede9fe;">
+              <th style="padding:6px 10px;text-align:left;border-radius:6px 0 0 6px;">出力形式</th>
+              <th style="padding:6px 10px;text-align:left;border-radius:0 6px 6px 0;">説明</th>
+            </tr>
+            <tr><td style="padding:6px 10px;">JPEG</td><td style="padding:6px 10px;">写真向け・高互換・ファイルサイズ小</td></tr>
+            <tr style="background:#faf5ff;"><td style="padding:6px 10px;">PNG</td><td style="padding:6px 10px;">透過対応・可逆圧縮・高品質</td></tr>
+            <tr><td style="padding:6px 10px;">WebP</td><td style="padding:6px 10px;">Web向け・高圧縮・透過対応</td></tr>
+            <tr style="background:#faf5ff;"><td style="padding:6px 10px;">AVIF</td><td style="padding:6px 10px;">次世代形式・高圧縮・透過対応</td></tr>
+            <tr><td style="padding:6px 10px;">BMP</td><td style="padding:6px 10px;">無圧縮・高互換性</td></tr>
+            <tr style="background:#faf5ff;"><td style="padding:6px 10px;">TIFF</td><td style="padding:6px 10px;">印刷・業務向け・高品質</td></tr>
+          </table>
+        </div>
+        """, unsafe_allow_html=True)
     else:
         st.markdown(selected_badge(f"{len(uploaded_files)} ファイルを選択中"), unsafe_allow_html=True)
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
