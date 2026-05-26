@@ -400,17 +400,20 @@ with tab_doc:
     DOC_INPUT_TYPES = ["txt", "docx", "pdf", "xlsx", "pptx"]
 
     OUTPUT_BY_EXT = {
-        "txt":  ["PDF"],
-        "docx": ["PDF", "TXT"],
-        "pdf":  ["TXT"],
-        "xlsx": ["PDF", "CSV"],
-        "pptx": ["PDF", "TXT"],
+        "txt":  ["PDF", "JPEG", "PNG", "WebP"],
+        "docx": ["PDF", "TXT", "JPEG", "PNG", "WebP"],
+        "pdf":  ["TXT", "JPEG", "PNG", "WebP"],
+        "xlsx": ["PDF", "CSV", "JPEG", "PNG", "WebP"],
+        "pptx": ["PDF", "TXT", "JPEG", "PNG", "WebP"],
     }
 
     FORMAT_NOTES = {
-        "PDF": "どの端末でも同じレイアウトで開ける",
-        "TXT": "テキストを抽出してプレーンテキストで保存",
-        "CSV": "Excel・スプレッドシートで開けるデータ形式",
+        "PDF":  "どの端末でも同じレイアウトで開ける",
+        "TXT":  "テキストを抽出してプレーンテキストで保存",
+        "CSV":  "Excel・スプレッドシートで開けるデータ形式",
+        "JPEG": "ページ・スライドごとに画像化（写真向け・高互換）",
+        "PNG":  "ページ・スライドごとに画像化（高品質・透過対応）",
+        "WebP": "ページ・スライドごとに画像化（Web向け・軽量）",
     }
 
     def libreoffice_available():
@@ -458,6 +461,34 @@ with tab_doc:
             return "\n".join(lines)
         return ""
 
+    def to_images(input_path, img_format, dpi, tmpdir):
+        import fitz
+        ext = Path(input_path).suffix.lower()
+        if ext != ".pdf":
+            pdf_path, err = to_pdf(input_path, tmpdir)
+            if not pdf_path:
+                return None, err
+            input_path = str(pdf_path)
+        doc = fitz.open(input_path)
+        matrix = fitz.Matrix(dpi / 72, dpi / 72)
+        suffix = {"JPEG": ".jpg", "PNG": ".png", "WebP": ".webp"}[img_format]
+        pil_fmt = {"JPEG": "JPEG", "PNG": "PNG", "WebP": "WEBP"}[img_format]
+        images = []
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            buf = io.BytesIO()
+            if img_format == "JPEG":
+                img.save(buf, pil_fmt, quality=90, optimize=True)
+            elif img_format == "PNG":
+                img.save(buf, pil_fmt)
+            else:
+                img.save(buf, pil_fmt, quality=90)
+            buf.seek(0)
+            images.append((f"page_{i+1:03d}{suffix}", buf.getvalue()))
+        doc.close()
+        return images, None
+
     def to_csv_bytes(input_path):
         import openpyxl
         wb = openpyxl.load_workbook(input_path, data_only=True)
@@ -493,11 +524,11 @@ with tab_doc:
               <th style="padding:6px 10px;text-align:left;border-radius:6px 0 0 6px;">入力</th>
               <th style="padding:6px 10px;text-align:left;border-radius:0 6px 6px 0;">変換できる形式</th>
             </tr>
-            <tr><td style="padding:6px 10px;">TXT</td><td style="padding:6px 10px;">→ PDF</td></tr>
-            <tr style="background:#faf5ff;"><td style="padding:6px 10px;">DOCX（Word）</td><td style="padding:6px 10px;">→ PDF・TXT</td></tr>
-            <tr><td style="padding:6px 10px;">PDF</td><td style="padding:6px 10px;">→ TXT（テキスト抽出）</td></tr>
-            <tr style="background:#faf5ff;"><td style="padding:6px 10px;">XLSX（Excel）</td><td style="padding:6px 10px;">→ PDF・CSV</td></tr>
-            <tr><td style="padding:6px 10px;">PPTX（PowerPoint）</td><td style="padding:6px 10px;">→ PDF・TXT</td></tr>
+            <tr><td style="padding:6px 10px;">TXT</td><td style="padding:6px 10px;">→ PDF・JPEG・PNG・WebP</td></tr>
+            <tr style="background:#faf5ff;"><td style="padding:6px 10px;">DOCX（Word）</td><td style="padding:6px 10px;">→ PDF・TXT・JPEG・PNG・WebP</td></tr>
+            <tr><td style="padding:6px 10px;">PDF</td><td style="padding:6px 10px;">→ TXT・JPEG・PNG・WebP</td></tr>
+            <tr style="background:#faf5ff;"><td style="padding:6px 10px;">XLSX（Excel）</td><td style="padding:6px 10px;">→ PDF・CSV・JPEG・PNG・WebP</td></tr>
+            <tr><td style="padding:6px 10px;">PPTX（PowerPoint）</td><td style="padding:6px 10px;">→ PDF・TXT・JPEG・PNG・WebP</td></tr>
           </table>
         </div>
         """, unsafe_allow_html=True)
@@ -516,10 +547,20 @@ with tab_doc:
             st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
             out_fmt = st.selectbox("✨ 変換後の形式", available_outputs, key="doc_out_fmt")
             st.markdown(format_badge(out_fmt, FORMAT_NOTES[out_fmt]), unsafe_allow_html=True)
+
+            dpi = 150
+            if out_fmt in ("JPEG", "PNG", "WebP"):
+                dpi = st.select_slider(
+                    "🖨️ 解像度 (DPI)",
+                    options=[96, 150, 300],
+                    value=150,
+                    help="96=画面表示向け・150=標準・300=印刷品質（ファイルサイズ大）",
+                    key="doc_dpi",
+                )
             st.divider()
 
             if st.button("✨ 変換開始", type="primary", key="doc_convert"):
-                needs_lo = (out_fmt == "PDF")
+                needs_lo = (out_fmt in ("PDF", "JPEG", "PNG", "WebP") and ext != "pdf")
                 if needs_lo and not libreoffice_available():
                     st.error("LibreOfficeがインストールされていないため、PDF変換は使用できません。")
                 else:
@@ -568,6 +609,32 @@ with tab_doc:
                                         file_name=out_stem + ".csv",
                                         mime="text/csv",
                                     )
+
+                                elif out_fmt in ("JPEG", "PNG", "WebP"):
+                                    images, err = to_images(input_path, out_fmt, dpi, tmpdir)
+                                    if images:
+                                        st.success(f"🎉 {len(images)} ページの画像化が完了しました！")
+                                        if len(images) == 1:
+                                            name, data = images[0]
+                                            st.download_button(
+                                                f"⬇️ ダウンロード：{name}",
+                                                data=data,
+                                                file_name=name,
+                                            )
+                                        else:
+                                            zip_buf = io.BytesIO()
+                                            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                                                for name, data in images:
+                                                    zf.writestr(f"{out_stem}/{name}", data)
+                                            zip_buf.seek(0)
+                                            st.download_button(
+                                                f"⬇️ すべてダウンロード（{len(images)} ページ） .zip",
+                                                data=zip_buf.getvalue(),
+                                                file_name=f"{out_stem}_images.zip",
+                                                mime="application/zip",
+                                            )
+                                    else:
+                                        st.error(f"画像変換に失敗しました。\n```\n{err[-500:]}\n```")
 
                         except subprocess.TimeoutExpired:
                             st.error("⏱️ 変換がタイムアウトしました。")
