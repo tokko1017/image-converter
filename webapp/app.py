@@ -377,7 +377,7 @@ with tab_vid:
 with tab_doc:
     DOC_INPUT_TYPES = ["txt", "docx", "pdf", "xlsx", "pptx"]
     OUTPUT_BY_EXT = {
-        "txt":  ["PDF", "JPEG", "PNG", "WebP"],
+        "txt":  ["PDF", "DOCX", "JPEG", "PNG", "WebP"],
         "docx": ["PDF", "TXT", "JPEG", "PNG", "WebP"],
         "pdf":  ["TXT", "DOCX", "PPTX", "JPEG", "PNG", "WebP"],
         "xlsx": ["PDF", "CSV", "JPEG", "PNG", "WebP"],
@@ -444,6 +444,16 @@ with tab_doc:
         cv = Converter(input_path)
         cv.convert(str(out))
         cv.close()
+        return out
+
+    def txt_to_docx_file(input_path, tmpdir):
+        from docx import Document
+        doc = Document()
+        with open(input_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f.read().splitlines():
+                doc.add_paragraph(line)
+        out = Path(tmpdir) / "output.docx"
+        doc.save(str(out))
         return out
 
     def to_images(input_path, img_format, dpi, tmpdir):
@@ -532,7 +542,7 @@ with tab_doc:
               <th style="padding:6px 10px;text-align:left;border-radius:6px 0 0 6px;">入力</th>
               <th style="padding:6px 10px;text-align:left;border-radius:0 6px 6px 0;">変換できる形式</th>
             </tr>
-            <tr><td style="padding:6px 10px;">TXT</td><td style="padding:6px 10px;">→ PDF・JPEG・PNG・WebP</td></tr>
+            <tr><td style="padding:6px 10px;">TXT</td><td style="padding:6px 10px;">→ PDF・<strong>DOCX</strong>・JPEG・PNG・WebP</td></tr>
             <tr style="background:#faf5ff;"><td style="padding:6px 10px;">DOCX（Word）</td><td style="padding:6px 10px;">→ PDF・TXT・JPEG・PNG・WebP</td></tr>
             <tr><td style="padding:6px 10px;">PDF</td><td style="padding:6px 10px;">→ TXT・<strong>DOCX</strong>・PPTX・JPEG・PNG・WebP</td></tr>
             <tr style="background:#faf5ff;"><td style="padding:6px 10px;">XLSX（Excel）</td><td style="padding:6px 10px;">→ PDF・CSV・JPEG・PNG・WebP</td></tr>
@@ -591,10 +601,16 @@ with tab_doc:
                                     else:
                                         st.warning("テキストが抽出できませんでした。スキャンされたPDFなどは対応できません。")
                                 elif out_fmt == "DOCX":
-                                    out_path = pdf_to_docx_file(input_path, tmpdir)
+                                    if ext == "pdf":
+                                        out_path = pdf_to_docx_file(input_path, tmpdir)
+                                        extra_note = "💡 スキャンされたPDFは文字が画像のままになります。テキストPDFで精度が上がります。"
+                                    else:
+                                        out_path = txt_to_docx_file(input_path, tmpdir)
+                                        extra_note = None
                                     out_name = Path(uploaded_doc.name).stem + ".docx"
                                     st.success(f"🎉 {out_name} の変換が完了しました！")
-                                    st.info("💡 スキャンされたPDFは文字が画像のままになります。テキストPDFで精度が上がります。")
+                                    if extra_note:
+                                        st.info(extra_note)
                                     st.download_button(
                                         f"⬇️ ダウンロード：{out_name}",
                                         data=out_path.read_bytes(),
