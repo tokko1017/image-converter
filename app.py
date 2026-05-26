@@ -878,44 +878,18 @@ with tab_sns:
 
 # ── 文字消し ──────────────────────────────────────────────────────────────────
 with tab_erase:
-    import sys as _sys
     import base64 as _b64mod
     import cv2
     import numpy as np
     from PIL import ImageDraw
     from streamlit_drawable_canvas import st_canvas
 
-    # ── st.image.image_to_url が Streamlit 1.28+ で壊れている問題を修正 ──────
-    # st_canvas.__globals__['st'] を差し替えて background_image を動作させる
-    try:
-        _real_st = _sys.modules['streamlit']   # 常に本物の streamlit を取得
-
-        class _ImgProxy:
-            """st.image の代替。image_to_url を持つ callable オブジェクト。"""
-            def __call__(self, *a, **kw):
-                return _real_st.image(*a, **kw)
-            def image_to_url(self, image, width=0, clamp=False, channels="RGB",
-                             output_format="PNG", image_id=""):
-                _b = io.BytesIO()
-                _f = output_format if output_format and output_format.upper() not in ("AUTO", "") else "PNG"
-                _i = image
-                if _f.upper() == "JPEG" and hasattr(_i, "mode") and _i.mode != "RGB":
-                    _i = _i.convert("RGB")
-                _i.save(_b, format=_f)
-                _b.seek(0)
-                return f"data:image/{_f.lower()};base64," + _b64mod.b64encode(_b.read()).decode()
-
-        class _StProxy:
-            """streamlit モジュールの薄いプロキシ。image だけ差し替える。"""
-            image = _ImgProxy()
-            def __getattr__(self, name):
-                return getattr(_real_st, name)
-
-        st_canvas.__globals__['st'] = _StProxy()
-        _bg_patch_ok = True
-    except Exception:
-        _bg_patch_ok = False
-    # ─────────────────────────────────────────────────────────────────────────
+    # _component_func を直接呼び出すことで st.image.image_to_url を完全に回避する。
+    # st_canvas() は内部で st.image.image_to_url を呼ぶが、Streamlit 1.28+ では
+    # この関数が存在しないため AttributeError になる。
+    # _component_func に backgroundImageURL として base64 データ URL を直接渡せば
+    # その呼び出し経路を通らずに済む。
+    _sdc_func = st_canvas.__globals__.get('_component_func')
 
     ERASE_INPUT = ["jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif"]
 
@@ -972,38 +946,57 @@ with tab_erase:
                                   help="小さいほど細かく、大きいほど広く補完します",
                                   key="erase_radius")
 
-        st.markdown(
-            "<p style='color:#7c3aed;font-size:0.88rem;margin:4px 0 6px;'>"
-            "📌 <strong>画像の上</strong>で<span style='color:#e11d48;'>消したい文字をそのまま赤くなぞって</span>ください。</p>",
-            unsafe_allow_html=True)
-
         if "erase_reset" not in st.session_state:
             st.session_state["erase_reset"] = 0
 
-        # background_image パッチが成功した場合は画像の上に直接描画
-        if _bg_patch_ok:
-            canvas_result = st_canvas(
-                stroke_width=brush_size,
-                stroke_color="rgba(255, 0, 0, 0.85)",
-                background_color="rgba(0,0,0,0)",
-                background_image=disp_img,
-                drawing_mode="freedraw",
-                update_streamlit=True,
+        if _sdc_func is not None:
+            # ── 画像の上に直接描画（_component_func 直接呼び出し） ──────────
+            st.markdown(
+                "<p style='color:#7c3aed;font-size:0.88rem;margin:4px 0 6px;'>"
+                "📌 <strong>画像の上</strong>で"
+                "<span style='color:#e11d48;'>消したい文字をそのまま赤くなぞって</span>ください。</p>",
+                unsafe_allow_html=True)
+
+            _buf = io.BytesIO()
+            disp_img.save(_buf, "PNG")
+            _buf.seek(0)
+            _bg_url = "data:image/png;base64," + _b64mod.b64encode(_buf.read()).decode()
+
+            _raw = _sdc_func(
+                strokeWidth=brush_size,
+                strokeColor="rgba(255, 0, 0, 0.85)",
+                backgroundColor="rgba(0,0,0,0)",
+                backgroundImageURL=_bg_url,
+                realtimeUpdateStreamlit=True,
                 height=ch,
                 width=cw,
+                drawingMode="freedraw",
+                initialDrawing={"version": "4.4.0", "objects": []},
+                displayToolbar=False,
+                displayRadius=0,
                 key=f"erase_canvas_{st.session_state['erase_reset']}",
+                default={"data": [], "json_data": {}},
             )
+            _json_data = (_raw.get("json_data") or {}) if isinstance(_raw, dict) else {}
+
+            class _CR:
+                json_data = _json_data
+            canvas_result = _CR()
         else:
-            # フォールバック：サイドバイサイドレイアウト
+            # ── フォールバック：サイドバイサイドレイアウト ──────────────────
+            st.markdown(
+                "<p style='color:#7c3aed;font-size:0.88rem;margin:4px 0 6px;'>"
+                "📌 左の画像を見ながら、<strong>右のキャンバス</strong>の同じ位置を"
+                "<span style='color:#e11d48;'>赤くなぞって</span>ください。</p>",
+                unsafe_allow_html=True)
             col_preview, col_draw = st.columns(2)
+            _fb_w = min(cw, 300)
+            _fb_h = round(ch * _fb_w / cw)
             with col_preview:
                 st.caption("📷 元画像")
-                preview_ph = st.empty()
-                preview_ph.image(disp_img, width=min(cw, 300))
+                st.image(disp_img, width=_fb_w)
             with col_draw:
                 st.caption("✏️ ここをなぞる")
-                _fb_w = min(cw, 300)
-                _fb_h = round(ch * _fb_w / cw)
                 canvas_result = st_canvas(
                     stroke_width=brush_size,
                     stroke_color="rgba(255, 0, 0, 0.85)",
@@ -1014,7 +1007,7 @@ with tab_erase:
                     width=_fb_w,
                     key=f"erase_canvas_{st.session_state['erase_reset']}",
                 )
-                cw, ch = _fb_w, _fb_h
+            cw, ch = _fb_w, _fb_h
 
         col_btn, col_reset = st.columns([3, 1])
         with col_reset:
