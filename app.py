@@ -929,9 +929,13 @@ with tab_erase:
                                   help="値が大きいほど広範囲を参照して補完します",
                                   key="erase_radius")
 
+        # ── ライブプレビュー（なぞった箇所を赤く表示） ──────────────────────
+        preview_ph = st.empty()
+
         st.markdown(
             "<p style='color:#7c3aed;font-size:0.88rem;margin:6px 0 2px;'>"
-            "📌 消したい部分を<strong>赤くなぞって</strong>から「消去する」を押してください。</p>",
+            "📌 <strong>下の白いキャンバス</strong>で消したい部分をなぞると、"
+            "上の画像に<strong style='color:#e11d48;'>赤く</strong>反映されます。</p>",
             unsafe_allow_html=True)
 
         if "erase_reset" not in st.session_state:
@@ -940,12 +944,40 @@ with tab_erase:
         canvas_result = _draw_canvas(
             stroke_width=brush_size,
             stroke_color="rgba(255, 0, 0, 0.85)",
-            background_image=disp_img,
-            background_color="#000000",
+            background_image=None,
+            background_color="#ffffff",
             height=disp_h,
             width=disp_w,
             key=f"erase_canvas_{st.session_state['erase_reset']}",
         )
+
+        # json_data のストロークを disp_img に重ねてプレビュー更新
+        objects = (canvas_result.json_data or {}).get("objects", [])
+        if objects:
+            _ov = Image.new("RGBA", (disp_w, disp_h), (0, 0, 0, 0))
+            _dov = ImageDraw.Draw(_ov)
+            for _obj in objects:
+                if _obj.get("type") != "path":
+                    continue
+                _sw = max(1, int(_obj.get("strokeWidth", brush_size)))
+                _pts = []
+                for _cmd in _obj.get("path", []):
+                    if _cmd[0] in ("M", "L"):
+                        _pts.append((_cmd[1], _cmd[2]))
+                    elif _cmd[0] == "Q":
+                        _pts.append((_cmd[3], _cmd[4]))
+                    elif _cmd[0] == "C":
+                        _pts.append((_cmd[5], _cmd[6]))
+                if len(_pts) >= 2:
+                    _dov.line(_pts, fill=(220, 30, 30, 190), width=_sw)
+                elif len(_pts) == 1:
+                    _r = _sw // 2
+                    _x, _y = _pts[0]
+                    _dov.ellipse([_x-_r, _y-_r, _x+_r, _y+_r], fill=(220, 30, 30, 190))
+            _comp = Image.alpha_composite(disp_img.convert("RGBA"), _ov).convert("RGB")
+            preview_ph.image(_comp, caption="🔴 赤い部分が消去されます", width=disp_w)
+        else:
+            preview_ph.image(disp_img, caption="↑ なぞった箇所がここに赤く表示されます", width=disp_w)
 
         col_btn, col_reset = st.columns([3, 1])
         with col_reset:
