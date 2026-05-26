@@ -90,13 +90,13 @@ hr {
 st.markdown("""
 <div style="text-align:center; padding: 24px 0 16px;">
   <div style="font-size:2.8rem; margin-bottom:8px;">🌸</div>
-  <h1 style="
+  <div style="
     background: linear-gradient(135deg, #e879f9, #818cf8);
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     background-clip: text;
     font-size: 2rem; font-weight: 900; margin: 0 0 6px; line-height: 1.3;">
     写真・動画 変換ツール
-  </h1>
+  </div>
   <p style="color: #9333ea; font-size: 0.95rem; margin: 0;">
     ドラッグ＆ドロップで簡単変換 ✨
   </p>
