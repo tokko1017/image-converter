@@ -624,7 +624,7 @@ with tab_doc:
                                         extra_note = "💡 スキャンされたPDFは文字が画像のままになります。テキストPDFで精度が上がります。"
                                     elif ext == "pptx":
                                         out_path = pptx_to_docx_file(input_path, tmpdir)
-                                        extra_note = None
+                                        extra_note = "💡 画像・図形は含まれません。スライド内のテキストのみ抽出されます。"
                                     else:
                                         out_path = txt_to_docx_file(input_path, tmpdir)
                                         extra_note = None
