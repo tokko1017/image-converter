@@ -326,6 +326,22 @@ with tab_vid:
                  "ダウンロードボタンから保存する"],
                 "MP4 / MOV / AVI / MKV / WebM / M4V"
             )
+            st.markdown("""
+            <div style="background:#f3e8ff;border-radius:14px;padding:16px;margin-top:12px;border:1.5px solid #ddd6fe;">
+              <p style="color:#7c3aed;font-weight:700;margin:0 0 10px;">📊 変換できる組み合わせ</p>
+              <p style="color:#6d28d9;font-size:0.85rem;margin:0 0 8px;">すべての入力形式から、すべての出力形式へ変換できます。</p>
+              <table style="width:100%;border-collapse:collapse;font-size:0.88rem;color:#4c1d95;">
+                <tr style="background:#ede9fe;">
+                  <th style="padding:6px 10px;text-align:left;border-radius:6px 0 0 6px;">出力形式</th>
+                  <th style="padding:6px 10px;text-align:left;border-radius:0 6px 6px 0;">説明</th>
+                </tr>
+                <tr><td style="padding:6px 10px;">MP4</td><td style="padding:6px 10px;">最も互換性が高い・スマホ・PC問わず再生可能</td></tr>
+                <tr style="background:#faf5ff;"><td style="padding:6px 10px;">WebM</td><td style="padding:6px 10px;">Web向け・軽量・ブラウザ再生に最適</td></tr>
+                <tr><td style="padding:6px 10px;">GIF</td><td style="padding:6px 10px;">アニメーションGIF・SNS向け（音声なし）</td></tr>
+                <tr style="background:#faf5ff;"><td style="padding:6px 10px;">MP3</td><td style="padding:6px 10px;">音声のみ抽出して保存</td></tr>
+              </table>
+            </div>
+            """, unsafe_allow_html=True)
             st.markdown(
                 warning_badge("ファイルサイズは <strong>200MB以下</strong> を推奨します"),
                 unsafe_allow_html=True
