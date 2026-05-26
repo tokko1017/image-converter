@@ -6,3 +6,5 @@ pdfplumber
 openpyxl
 python-pptx
 pymupdf
+streamlit-drawable-canvas
+opencv-python-headless

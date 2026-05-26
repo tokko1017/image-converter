@@ -28,9 +28,9 @@ div[data-baseweb="tab-list"] {
     gap: 4px;
 }
 button[data-baseweb="tab"] {
-    font-size: 0.97rem !important;
+    font-size: 0.9rem !important;
     font-weight: 700 !important;
-    padding: 11px 18px !important;
+    padding: 10px 14px !important;
     border-radius: 14px !important;
     color: #7c3aed !important;
     background: transparent !important;
@@ -93,11 +93,12 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab_img, tab_vid, tab_doc, tab_sns = st.tabs([
+tab_img, tab_vid, tab_doc, tab_sns, tab_erase = st.tabs([
     "　🖼️  画像変換　",
     "　🎬  動画変換　",
     "　📄  文書変換　",
     "　📱  SNSサイズ　",
+    "　✏️  文字消し　",
 ])
 
 # ── ヘルパー ─────────────────────────────────────────────────────────────────
@@ -813,3 +814,144 @@ with tab_sns:
                     st.error("⏱️ 変換がタイムアウトしました。ファイルサイズを小さくしてお試しください。")
                 except Exception as e:
                     st.error(f"エラーが発生しました：{e}")
+
+# ── 文字消し ──────────────────────────────────────────────────────────────────
+with tab_erase:
+    from streamlit_drawable_canvas import st_canvas
+    import cv2
+    import numpy as np
+    from PIL import ImageDraw
+
+    ERASE_INPUT = ["jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif"]
+
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+
+    uploaded_erase = st.file_uploader(
+        "📂 画像をアップロード",
+        type=ERASE_INPUT,
+        accept_multiple_files=False,
+        key="erase_uploader",
+    )
+
+    if not uploaded_erase:
+        step_guide(
+            ["画像ファイルを上の枠にドラッグ＆ドロップ（または「Upload」をクリック）",
+             "ブラシサイズを調整する",
+             "消したい文字・透かし・ロゴの上を赤くなぞる",
+             "「消去する」ボタンを押す",
+             "ダウンロードボタンから保存する"],
+            "JPEG / PNG / WebP / BMP / TIFF"
+        )
+        st.markdown("""
+        <div style="background:#fff7ed;border-radius:14px;padding:16px;margin-top:12px;border:1.5px solid #fed7aa;">
+          <p style="color:#92400e;font-weight:700;margin:0 0 8px;">⚠️ 得意・苦手なケース</p>
+          <div style="display:flex;gap:12px;">
+            <div style="flex:1;background:#f0fdf4;border-radius:10px;padding:12px;border:1.5px solid #6ee7b7;">
+              <p style="color:#065f46;font-weight:700;font-size:0.88rem;margin:0 0 4px;">✅ 得意</p>
+              <p style="color:#065f46;font-size:0.83rem;margin:0;">白・単色の背景にある文字、透かし、ロゴ</p>
+            </div>
+            <div style="flex:1;background:#fef2f2;border-radius:10px;padding:12px;border:1.5px solid #fca5a5;">
+              <p style="color:#991b1b;font-weight:700;font-size:0.88rem;margin:0 0 4px;">❌ 苦手</p>
+              <p style="color:#991b1b;font-size:0.83rem;margin:0;">写真など複雑な背景の上にある文字（精度が下がります）</p>
+            </div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        orig_img = Image.open(uploaded_erase).convert("RGB")
+        orig_w, orig_h = orig_img.size
+
+        MAX_W, MAX_H = 680, 560
+        scale = min(1.0, MAX_W / orig_w, MAX_H / orig_h)
+        disp_w = round(orig_w * scale)
+        disp_h = round(orig_h * scale)
+        disp_img = orig_img.resize((disp_w, disp_h), Image.LANCZOS)
+
+        col_brush, col_radius = st.columns(2)
+        with col_brush:
+            brush_size = st.slider("🖌️ ブラシサイズ", min_value=5, max_value=80, value=20,
+                                   key="erase_brush")
+        with col_radius:
+            inpaint_r = st.slider("🔧 補完の強さ", min_value=3, max_value=30, value=10,
+                                  help="値が大きいほど広範囲を参照して補完します",
+                                  key="erase_radius")
+
+        st.markdown(
+            "<p style='color:#7c3aed;font-size:0.88rem;margin:6px 0 4px;'>"
+            "🖌️ 消したい部分を赤くなぞってください。なぞり終わったら「消去する」を押してください。</p>",
+            unsafe_allow_html=True)
+
+        if "erase_reset" not in st.session_state:
+            st.session_state["erase_reset"] = 0
+
+        canvas_result = st_canvas(
+            stroke_width=brush_size,
+            stroke_color="rgba(255, 0, 0, 0.85)",
+            background_image=disp_img,
+            drawing_mode="freedraw",
+            update_streamlit=True,
+            height=disp_h,
+            width=disp_w,
+            key=f"erase_canvas_{st.session_state['erase_reset']}",
+        )
+
+        col_btn, col_reset = st.columns([3, 1])
+        with col_reset:
+            if st.button("🔄 なぞりをリセット", key="erase_reset_btn"):
+                st.session_state["erase_reset"] += 1
+                st.rerun()
+
+        st.divider()
+
+        with col_btn:
+            do_erase = st.button("✨ 消去する", type="primary", key="erase_btn")
+
+        if do_erase:
+            has_objects = (canvas_result.json_data and
+                           canvas_result.json_data.get("objects"))
+            if not has_objects:
+                st.warning("消去する範囲をなぞってから「消去する」を押してください。")
+            else:
+                with st.spinner("消去中..."):
+                    # json_data のパスデータからマスクを生成
+                    mask_img = Image.new("L", (disp_w, disp_h), 0)
+                    mask_draw = ImageDraw.Draw(mask_img)
+                    for obj in canvas_result.json_data["objects"]:
+                        if obj.get("type") != "path":
+                            continue
+                        sw = max(1, round(obj.get("strokeWidth", brush_size)))
+                        pts = []
+                        for cmd in obj.get("path", []):
+                            if cmd[0] in ("M", "L") and len(cmd) >= 3:
+                                pts.append((cmd[1], cmd[2]))
+                            elif cmd[0] == "Q" and len(cmd) >= 5:
+                                pts.append((cmd[3], cmd[4]))
+                        for i in range(len(pts) - 1):
+                            mask_draw.line([pts[i], pts[i+1]], fill=255, width=sw)
+                        for x, y in pts:
+                            r = sw // 2
+                            mask_draw.ellipse([x-r, y-r, x+r, y+r], fill=255)
+
+                    # 元サイズにスケール
+                    mask_orig = mask_img.resize((orig_w, orig_h), Image.NEAREST)
+                    mask_arr = np.array(mask_orig)
+
+                    # マスクを少し膨張させて確実に文字をカバー
+                    kernel = np.ones((5, 5), np.uint8)
+                    mask_arr = cv2.dilate(mask_arr, kernel, iterations=2)
+
+                    # インペインティング
+                    img_arr = np.array(orig_img)
+                    result_arr = cv2.inpaint(img_arr, mask_arr, inpaintRadius=inpaint_r,
+                                             flags=cv2.INPAINT_TELEA)
+                    result_img = Image.fromarray(result_arr)
+
+                    st.success("🎉 消去が完了しました！")
+                    st.image(result_img, caption="消去後", use_container_width=True)
+
+                    buf = io.BytesIO()
+                    result_img.save(buf, "PNG")
+                    buf.seek(0)
+                    out_name = Path(uploaded_erase.name).stem + "_erased.png"
+                    st.download_button(f"⬇️ ダウンロード：{out_name}",
+                                       data=buf.getvalue(), file_name=out_name)
