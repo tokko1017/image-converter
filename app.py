@@ -865,10 +865,14 @@ with tab_erase:
         if raw is None:
             return _sdc_mod.CanvasResult(blank, {"version": "4.4.0", "objects": []})
         img_data = blank
-        if raw.get("data") is not None:
-            img_data = np.reshape(
-                np.array(raw["data"], dtype=np.uint8), (height, width, 4)
-            )
+        raw_data = raw.get("data")
+        if raw_data is not None:
+            try:
+                arr = np.asarray(raw_data).ravel().astype(np.uint8)
+                if arr.size == height * width * 4:
+                    img_data = arr.reshape((height, width, 4))
+            except Exception:
+                pass
         return _sdc_mod.CanvasResult(img_data, raw.get("jsonData"))
 
     ERASE_INPUT = ["jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif"]
