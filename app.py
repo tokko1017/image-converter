@@ -817,6 +817,22 @@ with tab_sns:
 
 # ── 文字消し ──────────────────────────────────────────────────────────────────
 with tab_erase:
+    # Streamlit 1.28+ で st.image.image_to_url が削除されたための互換パッチ
+    try:
+        from streamlit.elements.image import image_to_url as _st_iurl
+        if not hasattr(st.image, "image_to_url"):
+            _orig_st_image = st.image
+            class _PatchedImg:
+                image_to_url = staticmethod(_st_iurl)
+                def __call__(self, *a, **k):
+                    return _orig_st_image(*a, **k)
+                def __getattr__(self, n):
+                    return getattr(_orig_st_image, n)
+            st.image = _PatchedImg()
+        _bg_ok = True
+    except Exception:
+        _bg_ok = False
+
     from streamlit_drawable_canvas import st_canvas
     import cv2
     import numpy as np
@@ -878,14 +894,7 @@ with tab_erase:
 
         st.markdown(
             "<p style='color:#7c3aed;font-size:0.88rem;margin:6px 0 2px;'>"
-            "📌 上の画像を見ながら、<strong>下の黒いキャンバスの同じ位置</strong>を白くなぞってください。</p>",
-            unsafe_allow_html=True)
-
-        st.image(disp_img, width=disp_w)
-
-        st.markdown(
-            "<p style='color:#6d28d9;font-size:0.85rem;margin:6px 0 2px;'>"
-            "⬇️ ここに消去したい部分をなぞる（白くなった部分が消去されます）</p>",
+            "📌 消したい部分を<strong>赤くなぞって</strong>から「消去する」を押してください。</p>",
             unsafe_allow_html=True)
 
         if "erase_reset" not in st.session_state:
@@ -893,8 +902,9 @@ with tab_erase:
 
         canvas_result = st_canvas(
             stroke_width=brush_size,
-            stroke_color="white",
-            background_color="black",
+            stroke_color="rgba(255, 0, 0, 0.85)",
+            background_image=disp_img if _bg_ok else None,
+            background_color="#000000",
             drawing_mode="freedraw",
             update_streamlit=True,
             height=disp_h,
@@ -920,14 +930,26 @@ with tab_erase:
                 st.warning("消去する範囲をなぞってから「消去する」を押してください。")
             else:
                 with st.spinner("消去中..."):
-                    # canvas の image_data から白い部分をマスクとして抽出
-                    canvas_arr = canvas_result.image_data  # RGBA
-                    mask_display = (
-                        (canvas_arr[:, :, 0] > 150) |
-                        (canvas_arr[:, :, 1] > 150) |
-                        (canvas_arr[:, :, 2] > 150)
-                    ).astype(np.uint8) * 255
-                    mask_img = Image.fromarray(mask_display)
+                    # json_data のパスからマスクを作成（background_image があっても正確に動く）
+                    mask_img = Image.new("L", (disp_w, disp_h), 0)
+                    draw_mask = ImageDraw.Draw(mask_img)
+                    for obj in (canvas_result.json_data or {}).get("objects", []):
+                        if obj.get("type") == "path":
+                            sw = max(1, int(obj.get("strokeWidth", brush_size)))
+                            pts = []
+                            for cmd in obj.get("path", []):
+                                if cmd[0] in ("M", "L"):
+                                    pts.append((cmd[1], cmd[2]))
+                                elif cmd[0] == "Q":
+                                    pts.append((cmd[3], cmd[4]))
+                                elif cmd[0] == "C":
+                                    pts.append((cmd[5], cmd[6]))
+                            if len(pts) >= 2:
+                                draw_mask.line(pts, fill=255, width=sw)
+                            elif len(pts) == 1:
+                                r = sw // 2
+                                x, y = pts[0]
+                                draw_mask.ellipse([x-r, y-r, x+r, y+r], fill=255)
 
                     # 元サイズにスケール
                     mask_orig = mask_img.resize((orig_w, orig_h), Image.NEAREST)
