@@ -817,33 +817,59 @@ with tab_sns:
 
 # ── 文字消し ──────────────────────────────────────────────────────────────────
 with tab_erase:
-    # st_canvas の background_image は内部で st.image.image_to_url() を呼ぶ。
-    # Streamlit バージョン差異を完全回避するため、常に自前の base64 実装で上書きする。
-    import base64 as _b64mod
-
-    def _b64_image_to_url(image, *args, **kwargs):
-        _buf = io.BytesIO()
-        if hasattr(image, "save"):
-            image.save(_buf, format="PNG")
-        _buf.seek(0)
-        return "data:image/png;base64," + _b64mod.b64encode(_buf.getvalue()).decode()
-
-    if not getattr(st.image, "_b64_patched", False):
-        _orig_st_image = st.image
-        class _PatchedImg:
-            _b64_patched = True
-            image_to_url = staticmethod(_b64_image_to_url)
-            def __call__(self, *a, **k):
-                return _orig_st_image(*a, **k)
-            def __getattr__(self, n):
-                return getattr(_orig_st_image, n)
-        st.image = _PatchedImg()
-    _bg_ok = True
-
-    from streamlit_drawable_canvas import st_canvas
+    import base64 as _b64mod, json as _json
+    import streamlit_drawable_canvas as _sdc_mod
     import cv2
     import numpy as np
     from PIL import ImageDraw
+
+    # _component_func を直接呼ぶことで st.image.image_to_url を完全にスキップする
+    _canvas_fn = _sdc_mod.st_canvas.__globals__.get("_component_func")
+
+    def _draw_canvas(*, stroke_width, stroke_color, background_image,
+                     background_color, height, width, key):
+        """st_canvas の代替: background_image を base64 に変換して直接 component に渡す。"""
+        bg_url = ""
+        if background_image is not None:
+            _buf = io.BytesIO()
+            if hasattr(background_image, "save"):
+                background_image.save(_buf, format="PNG")
+            _buf.seek(0)
+            bg_url = "data:image/png;base64," + _b64mod.b64encode(_buf.getvalue()).decode()
+
+        if _canvas_fn is None:
+            # フォールバック: background_image なしで呼ぶ
+            from streamlit_drawable_canvas import st_canvas as _sc
+            return _sc(stroke_width=stroke_width, stroke_color=stroke_color,
+                       background_color=background_color, drawing_mode="freedraw",
+                       update_streamlit=True, height=height, width=width, key=key)
+
+        raw = _canvas_fn(
+            fillColor="rgba(255,165,0,0.3)",
+            strokeWidth=stroke_width,
+            strokeColor=stroke_color,
+            backgroundColor=background_color,
+            backgroundImageURL=bg_url,
+            realtimeUpdateStreamlit=True,
+            canvasWidth=width,
+            canvasHeight=height,
+            drawingMode="freedraw",
+            initialDrawing=_json.dumps({"version": "4.4.0", "objects": []}),
+            displayToolbar=True,
+            displayRadius=3,
+            key=key,
+            default=None,
+        )
+
+        blank = np.zeros((height, width, 4), dtype=np.uint8)
+        if raw is None:
+            return _sdc_mod.CanvasResult(blank, {"version": "4.4.0", "objects": []})
+        img_data = blank
+        if raw.get("data") is not None:
+            img_data = np.reshape(
+                np.array(raw["data"], dtype=np.uint8), (height, width, 4)
+            )
+        return _sdc_mod.CanvasResult(img_data, raw.get("jsonData"))
 
     ERASE_INPUT = ["jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif"]
 
@@ -907,13 +933,11 @@ with tab_erase:
         if "erase_reset" not in st.session_state:
             st.session_state["erase_reset"] = 0
 
-        canvas_result = st_canvas(
+        canvas_result = _draw_canvas(
             stroke_width=brush_size,
             stroke_color="rgba(255, 0, 0, 0.85)",
-            background_image=disp_img if _bg_ok else None,
+            background_image=disp_img,
             background_color="#000000",
-            drawing_mode="freedraw",
-            update_streamlit=True,
             height=disp_h,
             width=disp_w,
             key=f"erase_canvas_{st.session_state['erase_reset']}",
