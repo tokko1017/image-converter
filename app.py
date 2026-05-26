@@ -818,37 +818,9 @@ with tab_sns:
 # ── 文字消し ──────────────────────────────────────────────────────────────────
 with tab_erase:
     import base64 as _b64mod
-    import streamlit_drawable_canvas as _sdc_mod
     import cv2
     import numpy as np
     from PIL import ImageDraw
-
-    # ── st_canvas 内の "st" 変数を差し替えて image_to_url を動かす ────────────
-    # Streamlit 1.28+ では st.image がメソッドになり .image_to_url が消えた。
-    # sys.modules['streamlit'] ではなく st_canvas の __globals__['st'] を
-    # 直接書き換えることで確実にパッチを当てる。
-    class _CanvasImgHelper:
-        def image_to_url(self, img, *args, **kwargs):
-            _buf = io.BytesIO()
-            if hasattr(img, "save"):
-                img.save(_buf, format="JPEG", quality=85)
-            _buf.seek(0)
-            return "data:image/jpeg;base64," + _b64mod.b64encode(_buf.getvalue()).decode()
-        def __call__(self, *a, **k):
-            return st.image(*a, **k)
-        def __getattr__(self, n):
-            return getattr(st, n)
-
-    class _CanvasPatchedSt:
-        _canvas_patched = True
-        image = _CanvasImgHelper()
-        def __getattr__(self, name):
-            return getattr(st, name)
-
-    _cg = _sdc_mod.st_canvas.__globals__
-    if not getattr(_cg.get("st"), "_canvas_patched", False):
-        _cg["st"] = _CanvasPatchedSt()
-
     from streamlit_drawable_canvas import st_canvas
 
     ERASE_INPUT = ["jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif"]
@@ -922,8 +894,7 @@ with tab_erase:
         canvas_result = st_canvas(
             stroke_width=brush_size,
             stroke_color="rgba(255, 0, 0, 0.85)",
-            background_image=disp_img,
-            background_color="",
+            background_color="#f0f0f0",
             drawing_mode="freedraw",
             update_streamlit=True,
             height=disp_h,
