@@ -882,14 +882,13 @@ with tab_erase:
     import cv2
     import numpy as np
     from PIL import ImageDraw
-    from streamlit_drawable_canvas import st_canvas
+    import streamlit.components.v1 as _comp_v1
 
-    # _component_func を直接呼び出すことで st.image.image_to_url を完全に回避する。
-    # st_canvas() は内部で st.image.image_to_url を呼ぶが、Streamlit 1.28+ では
-    # この関数が存在しないため AttributeError になる。
-    # _component_func に backgroundImageURL として base64 データ URL を直接渡せば
-    # その呼び出し経路を通らずに済む。
-    _sdc_func = st_canvas.__globals__.get('_component_func')
+    # 自前の HTML5 Canvas コンポーネントを使う。
+    # streamlit-drawable-canvas の background_image は Streamlit 1.28+ で壊れているため
+    # 使用しない。eraser_canvas/index.html が画像表示＋描画を完全に担う。
+    _ERASER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eraser_canvas")
+    _eraser_comp = _comp_v1.declare_component("eraser_canvas_v1", path=_ERASER_DIR)
 
     ERASE_INPUT = ["jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif"]
 
@@ -946,68 +945,31 @@ with tab_erase:
                                   help="小さいほど細かく、大きいほど広く補完します",
                                   key="erase_radius")
 
+        st.markdown(
+            "<p style='color:#7c3aed;font-size:0.88rem;margin:4px 0 6px;'>"
+            "📌 <strong>画像の上</strong>で"
+            "<span style='color:#e11d48;'>消したい文字をそのまま赤くなぞって</span>ください。</p>",
+            unsafe_allow_html=True)
+
         if "erase_reset" not in st.session_state:
             st.session_state["erase_reset"] = 0
 
-        if _sdc_func is not None:
-            # ── 画像の上に直接描画（_component_func 直接呼び出し） ──────────
-            st.markdown(
-                "<p style='color:#7c3aed;font-size:0.88rem;margin:4px 0 6px;'>"
-                "📌 <strong>画像の上</strong>で"
-                "<span style='color:#e11d48;'>消したい文字をそのまま赤くなぞって</span>ください。</p>",
-                unsafe_allow_html=True)
+        # 画像を base64 データ URL に変換してコンポーネントに渡す
+        _buf = io.BytesIO()
+        disp_img.save(_buf, "PNG")
+        _buf.seek(0)
+        _bg_url = "data:image/png;base64," + _b64mod.b64encode(_buf.read()).decode()
 
-            _buf = io.BytesIO()
-            disp_img.save(_buf, "PNG")
-            _buf.seek(0)
-            _bg_url = "data:image/png;base64," + _b64mod.b64encode(_buf.read()).decode()
-
-            _raw = _sdc_func(
-                strokeWidth=brush_size,
-                strokeColor="rgba(255, 0, 0, 0.85)",
-                backgroundColor="rgba(0,0,0,0)",
-                backgroundImageURL=_bg_url,
-                realtimeUpdateStreamlit=True,
-                height=ch,
-                width=cw,
-                drawingMode="freedraw",
-                initialDrawing={"version": "4.4.0", "objects": []},
-                displayToolbar=False,
-                displayRadius=0,
-                key=f"erase_canvas_{st.session_state['erase_reset']}",
-                default={"data": [], "json_data": {}},
-            )
-            _json_data = (_raw.get("json_data") or {}) if isinstance(_raw, dict) else {}
-
-            class _CR:
-                json_data = _json_data
-            canvas_result = _CR()
-        else:
-            # ── フォールバック：サイドバイサイドレイアウト ──────────────────
-            st.markdown(
-                "<p style='color:#7c3aed;font-size:0.88rem;margin:4px 0 6px;'>"
-                "📌 左の画像を見ながら、<strong>右のキャンバス</strong>の同じ位置を"
-                "<span style='color:#e11d48;'>赤くなぞって</span>ください。</p>",
-                unsafe_allow_html=True)
-            col_preview, col_draw = st.columns(2)
-            _fb_w = min(cw, 300)
-            _fb_h = round(ch * _fb_w / cw)
-            with col_preview:
-                st.caption("📷 元画像")
-                st.image(disp_img, width=_fb_w)
-            with col_draw:
-                st.caption("✏️ ここをなぞる")
-                canvas_result = st_canvas(
-                    stroke_width=brush_size,
-                    stroke_color="rgba(255, 0, 0, 0.85)",
-                    background_color="#f0f0f0",
-                    drawing_mode="freedraw",
-                    update_streamlit=True,
-                    height=_fb_h,
-                    width=_fb_w,
-                    key=f"erase_canvas_{st.session_state['erase_reset']}",
-                )
-            cw, ch = _fb_w, _fb_h
+        _result = _eraser_comp(
+            imageData=_bg_url,
+            width=cw,
+            height=ch,
+            brushSize=brush_size,
+            reset=st.session_state["erase_reset"],
+            key="eraser_canvas",
+            default={"paths": []},
+        )
+        paths_data = (_result.get("paths") or []) if isinstance(_result, dict) else []
 
         col_btn, col_reset = st.columns([3, 1])
         with col_reset:
@@ -1021,36 +983,26 @@ with tab_erase:
             do_erase = st.button("✨ 消去する", type="primary", key="erase_btn")
 
         if do_erase:
-            has_objects = (canvas_result.json_data and
-                           canvas_result.json_data.get("objects"))
-            if not has_objects:
+            if not paths_data:
                 st.warning("消去する範囲をなぞってから「消去する」を押してください。")
             else:
                 with st.spinner("消去中..."):
                     mask_img = Image.new("L", (cw, ch), 0)
                     draw_mask = ImageDraw.Draw(mask_img)
-                    for obj in (canvas_result.json_data or {}).get("objects", []):
-                        if obj.get("type") == "path":
-                            sw = max(1, int(obj.get("strokeWidth", brush_size)))
-                            pts = []
-                            for cmd in obj.get("path", []):
-                                if cmd[0] in ("M", "L"):
-                                    pts.append((cmd[1], cmd[2]))
-                                elif cmd[0] == "Q":
-                                    pts.append((cmd[3], cmd[4]))
-                                elif cmd[0] == "C":
-                                    pts.append((cmd[5], cmd[6]))
-                            if len(pts) >= 2:
-                                draw_mask.line(pts, fill=255, width=sw)
-                            elif len(pts) == 1:
-                                r = sw // 2
-                                x, y = pts[0]
-                                draw_mask.ellipse([x-r, y-r, x+r, y+r], fill=255)
+                    for path in paths_data:
+                        pts = [(p["x"], p["y"]) for p in path.get("points", [])]
+                        sw  = max(1, int(path.get("width", brush_size)))
+                        if len(pts) >= 2:
+                            draw_mask.line(pts, fill=255, width=sw)
+                        elif len(pts) == 1:
+                            r = sw // 2
+                            x, y = pts[0]
+                            draw_mask.ellipse([x-r, y-r, x+r, y+r], fill=255)
 
                     mask_orig = mask_img.resize((orig_w, orig_h), Image.NEAREST)
-                    mask_arr = np.array(mask_orig)
+                    mask_arr  = np.array(mask_orig)
 
-                    img_arr = np.array(orig_img)
+                    img_arr    = np.array(orig_img)
                     result_arr = cv2.inpaint(img_arr, mask_arr, inpaintRadius=inpaint_r,
                                              flags=cv2.INPAINT_TELEA)
                     result_img = Image.fromarray(result_arr)
