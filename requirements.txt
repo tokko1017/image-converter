@@ -1,3 +1,7 @@
 streamlit
 pillow
 pillow-heif
+python-docx
+pdfplumber
+openpyxl
+python-pptx

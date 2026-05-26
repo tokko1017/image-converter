@@ -6,12 +6,13 @@ import zipfile
 import subprocess
 import tempfile
 import os
+import csv
 from pathlib import Path
 
 pillow_heif.register_heif_opener()
 
 st.set_page_config(
-    page_title="写真・動画変換ツール",
+    page_title="写真・動画・文書 変換ツール",
     page_icon="🌸",
     layout="centered",
 )
@@ -28,9 +29,9 @@ div[data-baseweb="tab-list"] {
     gap: 6px;
 }
 button[data-baseweb="tab"] {
-    font-size: 1.15rem !important;
+    font-size: 1.05rem !important;
     font-weight: 700 !important;
-    padding: 14px 40px !important;
+    padding: 12px 28px !important;
     border-radius: 14px !important;
     color: #7c3aed !important;
     background: transparent !important;
@@ -95,7 +96,7 @@ st.markdown("""
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     background-clip: text;
     font-size: 2rem; font-weight: 900; margin: 0 0 6px; line-height: 1.3;">
-    写真・動画 変換ツール
+    写真・動画・文書 変換ツール
   </div>
   <p style="color: #9333ea; font-size: 0.95rem; margin: 0;">
     ドラッグ＆ドロップで簡単変換 ✨
@@ -103,9 +104,13 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab_img, tab_vid = st.tabs(["　🖼️  画像変換　", "　🎬  動画変換　"])
+tab_img, tab_vid, tab_doc = st.tabs([
+    "　🖼️  画像変換　",
+    "　🎬  動画変換　",
+    "　📄  文書変換　",
+])
 
-# ── ヘルパー：使い方ガイド ───────────────────────────────────────────────────
+# ── ヘルパー ─────────────────────────────────────────────────────────────────
 def step_guide(steps, formats_text):
     steps_html = "".join(f"""
       <div style="display:flex;align-items:center;gap:10px;padding:5px 0;">
@@ -389,3 +394,182 @@ with tab_vid:
                         st.error("⏱️ 変換がタイムアウトしました。ファイルサイズを小さくしてお試しください。")
                     except Exception as e:
                         st.error(f"エラーが発生しました：{e}")
+
+# ── 文書変換 ──────────────────────────────────────────────────────────────────
+with tab_doc:
+    DOC_INPUT_TYPES = ["txt", "docx", "pdf", "xlsx", "pptx"]
+
+    OUTPUT_BY_EXT = {
+        "txt":  ["PDF"],
+        "docx": ["PDF", "TXT"],
+        "pdf":  ["TXT"],
+        "xlsx": ["PDF", "CSV"],
+        "pptx": ["PDF", "TXT"],
+    }
+
+    FORMAT_NOTES = {
+        "PDF": "どの端末でも同じレイアウトで開ける",
+        "TXT": "テキストを抽出してプレーンテキストで保存",
+        "CSV": "Excel・スプレッドシートで開けるデータ形式",
+    }
+
+    def libreoffice_available():
+        try:
+            return subprocess.run(["libreoffice", "--version"],
+                                  capture_output=True, timeout=5).returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+    def to_pdf(input_path, tmpdir):
+        env = {**os.environ, "HOME": tmpdir}
+        cmd = ["libreoffice", "--headless", "--norestore",
+               "--convert-to", "pdf", "--outdir", tmpdir, input_path]
+        result = subprocess.run(cmd, capture_output=True, timeout=120, env=env)
+        out = Path(tmpdir) / (Path(input_path).stem + ".pdf")
+        if result.returncode == 0 and out.exists():
+            return out, None
+        return None, result.stderr.decode("utf-8", errors="replace")
+
+    def extract_text(input_path):
+        ext = Path(input_path).suffix.lower()
+        if ext == ".pdf":
+            import pdfplumber
+            parts = []
+            with pdfplumber.open(input_path) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        parts.append(t)
+            return "\n\n".join(parts)
+        elif ext == ".docx":
+            from docx import Document
+            doc = Document(input_path)
+            return "\n".join(p.text for p in doc.paragraphs)
+        elif ext == ".pptx":
+            from pptx import Presentation
+            prs = Presentation(input_path)
+            lines = []
+            for i, slide in enumerate(prs.slides, 1):
+                lines.append(f"=== スライド {i} ===")
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        lines.append(shape.text_frame.text)
+                lines.append("")
+            return "\n".join(lines)
+        return ""
+
+    def to_csv_bytes(input_path):
+        import openpyxl
+        wb = openpyxl.load_workbook(input_path, data_only=True)
+        ws = wb.active
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        for row in ws.iter_rows(values_only=True):
+            writer.writerow(['' if v is None else v for v in row])
+        return buf.getvalue().encode("utf-8-sig")
+
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+
+    uploaded_doc = st.file_uploader(
+        "📂 文書をアップロード",
+        type=DOC_INPUT_TYPES,
+        accept_multiple_files=False,
+        key="doc_uploader",
+    )
+
+    if not uploaded_doc:
+        step_guide(
+            ["文書ファイルを上の枠にドラッグ＆ドロップ（または「Upload」をクリック）",
+             "変換後の形式を選ぶ（ファイルの種類によって選択肢が変わります）",
+             "「変換開始」ボタンを押す",
+             "ダウンロードボタンから保存する"],
+            "TXT / DOCX / PDF / XLSX / PPTX"
+        )
+        st.markdown("""
+        <div style="background:#f3e8ff;border-radius:14px;padding:16px;margin-top:12px;border:1.5px solid #ddd6fe;">
+          <p style="color:#7c3aed;font-weight:700;margin:0 0 10px;">📊 変換できる組み合わせ</p>
+          <table style="width:100%;border-collapse:collapse;font-size:0.88rem;color:#4c1d95;">
+            <tr style="background:#ede9fe;">
+              <th style="padding:6px 10px;text-align:left;border-radius:6px 0 0 6px;">入力</th>
+              <th style="padding:6px 10px;text-align:left;border-radius:0 6px 6px 0;">変換できる形式</th>
+            </tr>
+            <tr><td style="padding:6px 10px;">TXT</td><td style="padding:6px 10px;">→ PDF</td></tr>
+            <tr style="background:#faf5ff;"><td style="padding:6px 10px;">DOCX（Word）</td><td style="padding:6px 10px;">→ PDF・TXT</td></tr>
+            <tr><td style="padding:6px 10px;">PDF</td><td style="padding:6px 10px;">→ TXT（テキスト抽出）</td></tr>
+            <tr style="background:#faf5ff;"><td style="padding:6px 10px;">XLSX（Excel）</td><td style="padding:6px 10px;">→ PDF・CSV</td></tr>
+            <tr><td style="padding:6px 10px;">PPTX（PowerPoint）</td><td style="padding:6px 10px;">→ PDF・TXT</td></tr>
+          </table>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        ext = Path(uploaded_doc.name).suffix.lower().lstrip(".")
+        size_kb = round(uploaded_doc.size / 1024, 1)
+        st.markdown(
+            selected_badge(f"{uploaded_doc.name} &nbsp; <span style='font-weight:400;'>{size_kb} KB</span>"),
+            unsafe_allow_html=True
+        )
+
+        available_outputs = OUTPUT_BY_EXT.get(ext, [])
+        if not available_outputs:
+            st.error("対応していない形式です。")
+        else:
+            st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+            out_fmt = st.selectbox("✨ 変換後の形式", available_outputs, key="doc_out_fmt")
+            st.markdown(format_badge(out_fmt, FORMAT_NOTES[out_fmt]), unsafe_allow_html=True)
+            st.divider()
+
+            if st.button("✨ 変換開始", type="primary", key="doc_convert"):
+                needs_lo = (out_fmt == "PDF")
+                if needs_lo and not libreoffice_available():
+                    st.error("LibreOfficeがインストールされていないため、PDF変換は使用できません。")
+                else:
+                    with st.spinner("変換中... しばらくお待ちください 📄"):
+                        try:
+                            with tempfile.TemporaryDirectory() as tmpdir:
+                                input_path = os.path.join(tmpdir, "input." + ext)
+                                with open(input_path, "wb") as f:
+                                    f.write(uploaded_doc.getbuffer())
+
+                                out_stem = Path(uploaded_doc.name).stem
+
+                                if out_fmt == "PDF":
+                                    out_path, err = to_pdf(input_path, tmpdir)
+                                    if out_path:
+                                        data = out_path.read_bytes()
+                                        st.success("🎉 変換が完了しました！")
+                                        st.download_button(
+                                            f"⬇️ ダウンロード：{out_stem}.pdf",
+                                            data=data,
+                                            file_name=out_stem + ".pdf",
+                                            mime="application/pdf",
+                                        )
+                                    else:
+                                        st.error(f"変換に失敗しました。\n```\n{err[-500:]}\n```")
+
+                                elif out_fmt == "TXT":
+                                    text = extract_text(input_path)
+                                    if text.strip():
+                                        st.success("🎉 テキストの抽出が完了しました！")
+                                        st.download_button(
+                                            f"⬇️ ダウンロード：{out_stem}.txt",
+                                            data=text.encode("utf-8"),
+                                            file_name=out_stem + ".txt",
+                                            mime="text/plain",
+                                        )
+                                    else:
+                                        st.warning("テキストが抽出できませんでした。スキャンされたPDFなどは対応できません。")
+
+                                elif out_fmt == "CSV":
+                                    data = to_csv_bytes(input_path)
+                                    st.success("🎉 変換が完了しました！")
+                                    st.download_button(
+                                        f"⬇️ ダウンロード：{out_stem}.csv",
+                                        data=data,
+                                        file_name=out_stem + ".csv",
+                                        mime="text/csv",
+                                    )
+
+                        except subprocess.TimeoutExpired:
+                            st.error("⏱️ 変換がタイムアウトしました。")
+                        except Exception as e:
+                            st.error(f"エラーが発生しました：{e}")
