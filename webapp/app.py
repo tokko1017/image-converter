@@ -13,27 +13,6 @@ st.set_page_config(
     layout="centered",
 )
 
-# ── パスワード保護 ────────────────────────────────────────────────────────────
-PASSWORD = st.secrets["password"]
-
-def check_password():
-    if st.session_state.get("authenticated"):
-        return True
-    st.title("🔒 画像変換ツール")
-    st.caption("このツールはパスワード保護されています。")
-    pw = st.text_input("パスワード", type="password", placeholder="パスワードを入力してください")
-    if st.button("ログイン", type="primary"):
-        if pw == PASSWORD:
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else:
-            st.error("パスワードが正しくありません。")
-    return False
-
-if not check_password():
-    st.stop()
-# ─────────────────────────────────────────────────────────────────────────────
-
 OUTPUT_FORMATS = {
     "JPEG": {"ext": ".jpg",  "pil": "JPEG", "alpha": False, "has_quality": True,  "note": "写真向け・高互換"},
     "PNG":  {"ext": ".png",  "pil": "PNG",  "alpha": True,  "has_quality": False, "note": "透過対応・可逆圧縮"},
