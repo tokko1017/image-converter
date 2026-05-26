@@ -817,21 +817,44 @@ with tab_sns:
 
 # ── 文字消し ──────────────────────────────────────────────────────────────────
 with tab_erase:
-    # Streamlit 1.28+ で st.image.image_to_url が削除されたための互換パッチ
-    try:
-        from streamlit.elements.image import image_to_url as _st_iurl
-        if not hasattr(st.image, "image_to_url"):
-            _orig_st_image = st.image
-            class _PatchedImg:
-                image_to_url = staticmethod(_st_iurl)
-                def __call__(self, *a, **k):
-                    return _orig_st_image(*a, **k)
-                def __getattr__(self, n):
-                    return getattr(_orig_st_image, n)
-            st.image = _PatchedImg()
-        _bg_ok = True
-    except Exception:
-        _bg_ok = False
+    # st_canvas の background_image を動かすために st.image.image_to_url が必要。
+    # Streamlit 1.28+ でこのメソッドが削除されたため、なければ自前の base64 実装で補う。
+    import base64 as _b64mod
+
+    def _img_to_url_b64(image, width=-1, clamp=False, channels="RGB",
+                        output_format="auto", image_id="", allow_emoji=False):
+        _buf = io.BytesIO()
+        if hasattr(image, "save"):
+            image.save(_buf, format="PNG")
+        _buf.seek(0)
+        return "data:image/png;base64," + _b64mod.b64encode(_buf.getvalue()).decode()
+
+    _st_iurl = None
+    for _mod_path in (
+        "streamlit.elements.image",
+        "streamlit.elements.lib.image",
+    ):
+        try:
+            import importlib as _il
+            _m = _il.import_module(_mod_path)
+            _st_iurl = getattr(_m, "image_to_url", None)
+            if _st_iurl is not None:
+                break
+        except Exception:
+            pass
+    if _st_iurl is None:
+        _st_iurl = _img_to_url_b64
+
+    if not hasattr(st.image, "image_to_url"):
+        _orig_st_image = st.image
+        class _PatchedImg:
+            image_to_url = staticmethod(_st_iurl)
+            def __call__(self, *a, **k):
+                return _orig_st_image(*a, **k)
+            def __getattr__(self, n):
+                return getattr(_orig_st_image, n)
+        st.image = _PatchedImg()
+    _bg_ok = True
 
     from streamlit_drawable_canvas import st_canvas
     import cv2
