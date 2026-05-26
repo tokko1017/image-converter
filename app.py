@@ -378,7 +378,7 @@ with tab_doc:
     OUTPUT_BY_EXT = {
         "txt":  ["PDF", "JPEG", "PNG", "WebP"],
         "docx": ["PDF", "TXT", "JPEG", "PNG", "WebP"],
-        "pdf":  ["TXT", "JPEG", "PNG", "WebP"],
+        "pdf":  ["TXT", "PPTX", "JPEG", "PNG", "WebP"],
         "xlsx": ["PDF", "CSV", "JPEG", "PNG", "WebP"],
         "pptx": ["PDF", "TXT", "JPEG", "PNG", "WebP"],
     }
@@ -386,6 +386,7 @@ with tab_doc:
         "PDF":  "どの端末でも同じレイアウトで開ける",
         "TXT":  "テキストを抽出してプレーンテキストで保存",
         "CSV":  "Excel・スプレッドシートで開けるデータ形式",
+        "PPTX": "PDFの各ページをスライドとして画像化・PowerPointで開ける",
         "JPEG": "ページ・スライドごとに画像化（写真向け・高互換）",
         "PNG":  "ページ・スライドごとに画像化（高品質・透過対応）",
         "WebP": "ページ・スライドごとに画像化（Web向け・軽量）",
@@ -407,6 +408,33 @@ with tab_doc:
         if result.returncode == 0 and out.exists():
             return out, None
         return None, result.stderr.decode("utf-8", errors="replace")
+
+    def pdf_to_pptx(input_path, tmpdir, dpi=150):
+        import fitz
+        from pptx import Presentation
+        from pptx.util import Inches
+        doc = fitz.open(input_path)
+        prs = Presentation()
+        if len(doc) > 0:
+            r = doc[0].rect
+            prs.slide_width  = Inches(r.width  / 72)
+            prs.slide_height = Inches(r.height / 72)
+        matrix = fitz.Matrix(dpi / 72, dpi / 72)
+        blank = prs.slide_layouts[6]
+        for page in doc:
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            buf = io.BytesIO()
+            img.save(buf, "PNG")
+            buf.seek(0)
+            slide = prs.slides.add_slide(blank)
+            slide.shapes.add_picture(buf, 0, 0,
+                                     width=prs.slide_width,
+                                     height=prs.slide_height)
+        doc.close()
+        out = Path(tmpdir) / "output.pptx"
+        prs.save(str(out))
+        return out
 
     def to_images(input_path, img_format, dpi, tmpdir):
         import fitz
@@ -496,7 +524,7 @@ with tab_doc:
             </tr>
             <tr><td style="padding:6px 10px;">TXT</td><td style="padding:6px 10px;">→ PDF・JPEG・PNG・WebP</td></tr>
             <tr style="background:#faf5ff;"><td style="padding:6px 10px;">DOCX（Word）</td><td style="padding:6px 10px;">→ PDF・TXT・JPEG・PNG・WebP</td></tr>
-            <tr><td style="padding:6px 10px;">PDF</td><td style="padding:6px 10px;">→ TXT・JPEG・PNG・WebP</td></tr>
+            <tr><td style="padding:6px 10px;">PDF</td><td style="padding:6px 10px;">→ TXT・PPTX・JPEG・PNG・WebP</td></tr>
             <tr style="background:#faf5ff;"><td style="padding:6px 10px;">XLSX（Excel）</td><td style="padding:6px 10px;">→ PDF・CSV・JPEG・PNG・WebP</td></tr>
             <tr><td style="padding:6px 10px;">PPTX（PowerPoint）</td><td style="padding:6px 10px;">→ PDF・TXT・JPEG・PNG・WebP</td></tr>
           </table>
@@ -516,7 +544,7 @@ with tab_doc:
             out_fmt = st.selectbox("✨ 変換後の形式", available_outputs, key="doc_out_fmt")
             st.markdown(format_badge(out_fmt, FORMAT_NOTES[out_fmt]), unsafe_allow_html=True)
             dpi = 150
-            if out_fmt in ("JPEG", "PNG", "WebP"):
+            if out_fmt in ("JPEG", "PNG", "WebP", "PPTX"):
                 dpi = st.select_slider("🖨️ 解像度 (DPI)", options=[96, 150, 300], value=150,
                                        help="96=画面向け・150=標準・300=印刷品質", key="doc_dpi")
             st.divider()
@@ -552,6 +580,16 @@ with tab_doc:
                                                            mime="text/plain")
                                     else:
                                         st.warning("テキストが抽出できませんでした。スキャンされたPDFなどは対応できません。")
+                                elif out_fmt == "PPTX":
+                                    out_path = pdf_to_pptx(input_path, tmpdir, dpi)
+                                    out_name = Path(uploaded_doc.name).stem + ".pptx"
+                                    st.success(f"🎉 {out_name} の変換が完了しました！")
+                                    st.download_button(
+                                        f"⬇️ ダウンロード：{out_name}",
+                                        data=out_path.read_bytes(),
+                                        file_name=out_name,
+                                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                    )
                                 elif out_fmt == "CSV":
                                     st.success("🎉 変換が完了しました！")
                                     st.download_button(f"⬇️ ダウンロード：{out_stem}.csv",
