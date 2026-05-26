@@ -379,7 +379,7 @@ with tab_doc:
     OUTPUT_BY_EXT = {
         "txt":  ["PDF", "JPEG", "PNG", "WebP"],
         "docx": ["PDF", "TXT", "JPEG", "PNG", "WebP"],
-        "pdf":  ["TXT", "PPTX", "JPEG", "PNG", "WebP"],
+        "pdf":  ["TXT", "DOCX", "PPTX", "JPEG", "PNG", "WebP"],
         "xlsx": ["PDF", "CSV", "JPEG", "PNG", "WebP"],
         "pptx": ["PDF", "TXT", "JPEG", "PNG", "WebP"],
     }
@@ -387,6 +387,7 @@ with tab_doc:
         "PDF":  "どの端末でも同じレイアウトで開ける",
         "TXT":  "テキストを抽出してプレーンテキストで保存",
         "CSV":  "Excel・スプレッドシートで開けるデータ形式",
+        "DOCX": "Word文書として開ける（文字・表・レイアウトを可能な範囲で再現）",
         "PPTX": "PDFの各ページをスライドとして画像化・PowerPointで開ける",
         "JPEG": "ページ・スライドごとに画像化（写真向け・高互換）",
         "PNG":  "ページ・スライドごとに画像化（高品質・透過対応）",
@@ -435,6 +436,14 @@ with tab_doc:
         doc.close()
         out = Path(tmpdir) / "output.pptx"
         prs.save(str(out))
+        return out
+
+    def pdf_to_docx_file(input_path, tmpdir):
+        from pdf2docx import Converter
+        out = Path(tmpdir) / "output.docx"
+        cv = Converter(input_path)
+        cv.convert(str(out))
+        cv.close()
         return out
 
     def to_images(input_path, img_format, dpi, tmpdir):
@@ -525,7 +534,7 @@ with tab_doc:
             </tr>
             <tr><td style="padding:6px 10px;">TXT</td><td style="padding:6px 10px;">→ PDF・JPEG・PNG・WebP</td></tr>
             <tr style="background:#faf5ff;"><td style="padding:6px 10px;">DOCX（Word）</td><td style="padding:6px 10px;">→ PDF・TXT・JPEG・PNG・WebP</td></tr>
-            <tr><td style="padding:6px 10px;">PDF</td><td style="padding:6px 10px;">→ TXT・PPTX・JPEG・PNG・WebP</td></tr>
+            <tr><td style="padding:6px 10px;">PDF</td><td style="padding:6px 10px;">→ TXT・<strong>DOCX</strong>・PPTX・JPEG・PNG・WebP</td></tr>
             <tr style="background:#faf5ff;"><td style="padding:6px 10px;">XLSX（Excel）</td><td style="padding:6px 10px;">→ PDF・CSV・JPEG・PNG・WebP</td></tr>
             <tr><td style="padding:6px 10px;">PPTX（PowerPoint）</td><td style="padding:6px 10px;">→ PDF・TXT・JPEG・PNG・WebP</td></tr>
           </table>
@@ -581,6 +590,17 @@ with tab_doc:
                                                            mime="text/plain")
                                     else:
                                         st.warning("テキストが抽出できませんでした。スキャンされたPDFなどは対応できません。")
+                                elif out_fmt == "DOCX":
+                                    out_path = pdf_to_docx_file(input_path, tmpdir)
+                                    out_name = Path(uploaded_doc.name).stem + ".docx"
+                                    st.success(f"🎉 {out_name} の変換が完了しました！")
+                                    st.info("💡 スキャンされたPDFは文字が画像のままになります。テキストPDFで精度が上がります。")
+                                    st.download_button(
+                                        f"⬇️ ダウンロード：{out_name}",
+                                        data=out_path.read_bytes(),
+                                        file_name=out_name,
+                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    )
                                 elif out_fmt == "PPTX":
                                     out_path = pdf_to_pptx(input_path, tmpdir, dpi)
                                     out_name = Path(uploaded_doc.name).stem + ".pptx"
@@ -817,11 +837,44 @@ with tab_sns:
 
 # ── 文字消し ──────────────────────────────────────────────────────────────────
 with tab_erase:
+    import sys as _sys
     import base64 as _b64mod
     import cv2
     import numpy as np
     from PIL import ImageDraw
     from streamlit_drawable_canvas import st_canvas
+
+    # ── st.image.image_to_url が Streamlit 1.28+ で壊れている問題を修正 ──────
+    # st_canvas.__globals__['st'] を差し替えて background_image を動作させる
+    try:
+        _real_st = _sys.modules['streamlit']   # 常に本物の streamlit を取得
+
+        class _ImgProxy:
+            """st.image の代替。image_to_url を持つ callable オブジェクト。"""
+            def __call__(self, *a, **kw):
+                return _real_st.image(*a, **kw)
+            def image_to_url(self, image, width=0, clamp=False, channels="RGB",
+                             output_format="PNG", image_id=""):
+                _b = io.BytesIO()
+                _f = output_format if output_format and output_format.upper() not in ("AUTO", "") else "PNG"
+                _i = image
+                if _f.upper() == "JPEG" and hasattr(_i, "mode") and _i.mode != "RGB":
+                    _i = _i.convert("RGB")
+                _i.save(_b, format=_f)
+                _b.seek(0)
+                return f"data:image/{_f.lower()};base64," + _b64mod.b64encode(_b.read()).decode()
+
+        class _StProxy:
+            """streamlit モジュールの薄いプロキシ。image だけ差し替える。"""
+            image = _ImgProxy()
+            def __getattr__(self, name):
+                return getattr(_real_st, name)
+
+        st_canvas.__globals__['st'] = _StProxy()
+        _bg_patch_ok = True
+    except Exception:
+        _bg_patch_ok = False
+    # ─────────────────────────────────────────────────────────────────────────
 
     ERASE_INPUT = ["jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif"]
 
@@ -838,7 +891,7 @@ with tab_erase:
         step_guide(
             ["画像ファイルを上の枠にドラッグ＆ドロップ（または「Upload」をクリック）",
              "ブラシサイズを調整する",
-             "消したい文字・透かし・ロゴの上を赤くなぞる",
+             "消したい文字・透かし・ロゴの上を直接赤くなぞる",
              "「消去する」ボタンを押す",
              "ダウンロードボタンから保存する"],
             "JPEG / PNG / WebP / BMP / TIFF"
@@ -862,11 +915,11 @@ with tab_erase:
         orig_img = Image.open(uploaded_erase).convert("RGB")
         orig_w, orig_h = orig_img.size
 
-        # 横並びに収まるサイズに縮小（各カラム最大300px）
-        MAX_COL_W, MAX_COL_H = 300, 460
-        scale = min(1.0, MAX_COL_W / orig_w, MAX_COL_H / orig_h)
-        cw = round(orig_w * scale)   # canvas / display width
-        ch = round(orig_h * scale)   # canvas / display height
+        # キャンバス表示サイズ（最大650px幅 × 700px高）
+        MAX_W, MAX_H = 650, 700
+        scale = min(1.0, MAX_W / orig_w, MAX_H / orig_h)
+        cw = round(orig_w * scale)
+        ch = round(orig_h * scale)
         disp_img = orig_img.resize((cw, ch), Image.LANCZOS)
 
         col_brush, col_radius = st.columns(2)
@@ -880,61 +933,47 @@ with tab_erase:
 
         st.markdown(
             "<p style='color:#7c3aed;font-size:0.88rem;margin:4px 0 6px;'>"
-            "📌 左の画像を見ながら、<strong>右のキャンバス</strong>の同じ位置を"
-            "<span style='color:#e11d48;'>赤くなぞって</span>ください。"
-            "なぞると左の画像にリアルタイム反映されます。</p>",
+            "📌 <strong>画像の上</strong>で<span style='color:#e11d48;'>消したい文字をそのまま赤くなぞって</span>ください。</p>",
             unsafe_allow_html=True)
 
         if "erase_reset" not in st.session_state:
             st.session_state["erase_reset"] = 0
 
-        # ── 横並び：左＝参照プレビュー  右＝描画キャンバス ──────────────
-        col_preview, col_draw = st.columns(2)
-
-        with col_preview:
-            st.caption("📷 元画像（なぞると赤く表示）")
-            preview_ph = st.empty()
-            preview_ph.image(disp_img, width=cw)
-
-        with col_draw:
-            st.caption("✏️ ここをなぞる（同じ縮尺）")
+        # background_image パッチが成功した場合は画像の上に直接描画
+        if _bg_patch_ok:
             canvas_result = st_canvas(
                 stroke_width=brush_size,
                 stroke_color="rgba(255, 0, 0, 0.85)",
-                background_color="#f0f0f0",
+                background_color="rgba(0,0,0,0)",
+                background_image=disp_img,
                 drawing_mode="freedraw",
                 update_streamlit=True,
                 height=ch,
                 width=cw,
                 key=f"erase_canvas_{st.session_state['erase_reset']}",
             )
-
-        # なぞったストロークを左の画像に赤くオーバーレイ
-        _objs = (canvas_result.json_data or {}).get("objects", [])
-        if _objs:
-            _ov = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-            _dov = ImageDraw.Draw(_ov)
-            for _obj in _objs:
-                if _obj.get("type") != "path":
-                    continue
-                _sw = max(1, int(_obj.get("strokeWidth", brush_size)))
-                _pts = []
-                for _cmd in _obj.get("path", []):
-                    if _cmd[0] in ("M", "L"):
-                        _pts.append((_cmd[1], _cmd[2]))
-                    elif _cmd[0] == "Q":
-                        _pts.append((_cmd[3], _cmd[4]))
-                    elif _cmd[0] == "C":
-                        _pts.append((_cmd[5], _cmd[6]))
-                if len(_pts) >= 2:
-                    _dov.line(_pts, fill=(220, 30, 30, 200), width=_sw)
-                elif len(_pts) == 1:
-                    _r2 = _sw // 2
-                    _x2, _y2 = _pts[0]
-                    _dov.ellipse([_x2-_r2, _y2-_r2, _x2+_r2, _y2+_r2],
-                                 fill=(220, 30, 30, 200))
-            _comp = Image.alpha_composite(disp_img.convert("RGBA"), _ov).convert("RGB")
-            preview_ph.image(_comp, width=cw)
+        else:
+            # フォールバック：サイドバイサイドレイアウト
+            col_preview, col_draw = st.columns(2)
+            with col_preview:
+                st.caption("📷 元画像")
+                preview_ph = st.empty()
+                preview_ph.image(disp_img, width=min(cw, 300))
+            with col_draw:
+                st.caption("✏️ ここをなぞる")
+                _fb_w = min(cw, 300)
+                _fb_h = round(ch * _fb_w / cw)
+                canvas_result = st_canvas(
+                    stroke_width=brush_size,
+                    stroke_color="rgba(255, 0, 0, 0.85)",
+                    background_color="#f0f0f0",
+                    drawing_mode="freedraw",
+                    update_streamlit=True,
+                    height=_fb_h,
+                    width=_fb_w,
+                    key=f"erase_canvas_{st.session_state['erase_reset']}",
+                )
+                cw, ch = _fb_w, _fb_h
 
         col_btn, col_reset = st.columns([3, 1])
         with col_reset:
@@ -954,7 +993,6 @@ with tab_erase:
                 st.warning("消去する範囲をなぞってから「消去する」を押してください。")
             else:
                 with st.spinner("消去中..."):
-                    # キャンバスサイズで json_data パスからマスクを作成
                     mask_img = Image.new("L", (cw, ch), 0)
                     draw_mask = ImageDraw.Draw(mask_img)
                     for obj in (canvas_result.json_data or {}).get("objects", []):
@@ -975,11 +1013,9 @@ with tab_erase:
                                 x, y = pts[0]
                                 draw_mask.ellipse([x-r, y-r, x+r, y+r], fill=255)
 
-                    # 元サイズにスケール（dilation なし → にじみ防止）
                     mask_orig = mask_img.resize((orig_w, orig_h), Image.NEAREST)
                     mask_arr = np.array(mask_orig)
 
-                    # インペインティング
                     img_arr = np.array(orig_img)
                     result_arr = cv2.inpaint(img_arr, mask_arr, inpaintRadius=inpaint_r,
                                              flags=cv2.INPAINT_TELEA)

@@ -8,3 +8,4 @@ python-pptx
 pymupdf
 streamlit-drawable-canvas
 opencv-python-headless
+pdf2docx
