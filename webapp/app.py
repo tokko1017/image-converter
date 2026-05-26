@@ -381,7 +381,7 @@ with tab_doc:
         "docx": ["PDF", "TXT", "JPEG", "PNG", "WebP"],
         "pdf":  ["TXT", "DOCX", "PPTX", "JPEG", "PNG", "WebP"],
         "xlsx": ["PDF", "CSV", "JPEG", "PNG", "WebP"],
-        "pptx": ["PDF", "TXT", "JPEG", "PNG", "WebP"],
+        "pptx": ["PDF", "TXT", "DOCX", "JPEG", "PNG", "WebP"],
     }
     FORMAT_NOTES = {
         "PDF":  "どの端末でも同じレイアウトで開ける",
@@ -452,6 +452,24 @@ with tab_doc:
         with open(input_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f.read().splitlines():
                 doc.add_paragraph(line)
+        out = Path(tmpdir) / "output.docx"
+        doc.save(str(out))
+        return out
+
+    def pptx_to_docx_file(input_path, tmpdir):
+        from pptx import Presentation
+        from docx import Document
+        prs = Presentation(input_path)
+        doc = Document()
+        for i, slide in enumerate(prs.slides, 1):
+            doc.add_heading(f"スライド {i}", level=1)
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for para in shape.text_frame.paragraphs:
+                        text = para.text.strip()
+                        if text:
+                            doc.add_paragraph(text)
+            doc.add_paragraph("")
         out = Path(tmpdir) / "output.docx"
         doc.save(str(out))
         return out
@@ -546,7 +564,7 @@ with tab_doc:
             <tr style="background:#faf5ff;"><td style="padding:6px 10px;">DOCX（Word）</td><td style="padding:6px 10px;">→ PDF・TXT・JPEG・PNG・WebP</td></tr>
             <tr><td style="padding:6px 10px;">PDF</td><td style="padding:6px 10px;">→ TXT・<strong>DOCX</strong>・PPTX・JPEG・PNG・WebP</td></tr>
             <tr style="background:#faf5ff;"><td style="padding:6px 10px;">XLSX（Excel）</td><td style="padding:6px 10px;">→ PDF・CSV・JPEG・PNG・WebP</td></tr>
-            <tr><td style="padding:6px 10px;">PPTX（PowerPoint）</td><td style="padding:6px 10px;">→ PDF・TXT・JPEG・PNG・WebP</td></tr>
+            <tr><td style="padding:6px 10px;">PPTX（PowerPoint）</td><td style="padding:6px 10px;">→ PDF・TXT・<strong>DOCX</strong>・JPEG・PNG・WebP</td></tr>
           </table>
         </div>
         """, unsafe_allow_html=True)
@@ -604,6 +622,9 @@ with tab_doc:
                                     if ext == "pdf":
                                         out_path = pdf_to_docx_file(input_path, tmpdir)
                                         extra_note = "💡 スキャンされたPDFは文字が画像のままになります。テキストPDFで精度が上がります。"
+                                    elif ext == "pptx":
+                                        out_path = pptx_to_docx_file(input_path, tmpdir)
+                                        extra_note = None
                                     else:
                                         out_path = txt_to_docx_file(input_path, tmpdir)
                                         extra_note = None
