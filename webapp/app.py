@@ -862,52 +862,59 @@ with tab_erase:
         orig_img = Image.open(uploaded_erase).convert("RGB")
         orig_w, orig_h = orig_img.size
 
-        MAX_W, MAX_H = 680, 560
-        scale = min(1.0, MAX_W / orig_w, MAX_H / orig_h)
-        disp_w = round(orig_w * scale)
-        disp_h = round(orig_h * scale)
-        disp_img = orig_img.resize((disp_w, disp_h), Image.LANCZOS)
+        # 横並びに収まるサイズに縮小（各カラム最大300px）
+        MAX_COL_W, MAX_COL_H = 300, 460
+        scale = min(1.0, MAX_COL_W / orig_w, MAX_COL_H / orig_h)
+        cw = round(orig_w * scale)   # canvas / display width
+        ch = round(orig_h * scale)   # canvas / display height
+        disp_img = orig_img.resize((cw, ch), Image.LANCZOS)
 
         col_brush, col_radius = st.columns(2)
         with col_brush:
-            brush_size = st.slider("🖌️ ブラシサイズ", min_value=5, max_value=80, value=20,
+            brush_size = st.slider("🖌️ ブラシサイズ", min_value=3, max_value=60, value=12,
                                    key="erase_brush")
         with col_radius:
-            inpaint_r = st.slider("🔧 補完の強さ", min_value=3, max_value=30, value=10,
-                                  help="値が大きいほど広範囲を参照して補完します",
+            inpaint_r = st.slider("🔧 補完の強さ", min_value=1, max_value=20, value=5,
+                                  help="小さいほど細かく、大きいほど広く補完します",
                                   key="erase_radius")
 
-        # ── ライブプレビュー（なぞった部分が赤くなる） ──────────────────────
-        preview_ph = st.empty()
-        preview_ph.image(disp_img, width=disp_w,
-                         caption="↓ 下のキャンバスをなぞると、ここに赤く反映されます")
-
         st.markdown(
-            "<p style='color:#7c3aed;font-size:0.88rem;margin:6px 0 2px;'>"
-            "📌 <strong>下のキャンバス</strong>で消したい部分を赤くなぞってください"
-            "（上の画像に反映されます）。</p>",
+            "<p style='color:#7c3aed;font-size:0.88rem;margin:4px 0 6px;'>"
+            "📌 左の画像を見ながら、<strong>右のキャンバス</strong>の同じ位置を"
+            "<span style='color:#e11d48;'>赤くなぞって</span>ください。"
+            "なぞると左の画像にリアルタイム反映されます。</p>",
             unsafe_allow_html=True)
 
         if "erase_reset" not in st.session_state:
             st.session_state["erase_reset"] = 0
 
-        canvas_result = st_canvas(
-            stroke_width=brush_size,
-            stroke_color="rgba(255, 0, 0, 0.85)",
-            background_color="#f0f0f0",
-            drawing_mode="freedraw",
-            update_streamlit=True,
-            height=disp_h,
-            width=disp_w,
-            key=f"erase_canvas_{st.session_state['erase_reset']}",
-        )
+        # ── 横並び：左＝参照プレビュー  右＝描画キャンバス ──────────────
+        col_preview, col_draw = st.columns(2)
 
-        # json_data のストロークを元画像に重ねてライブプレビュー更新
-        _erase_objects = (canvas_result.json_data or {}).get("objects", [])
-        if _erase_objects:
-            _ov = Image.new("RGBA", (disp_w, disp_h), (0, 0, 0, 0))
+        with col_preview:
+            st.caption("📷 元画像（なぞると赤く表示）")
+            preview_ph = st.empty()
+            preview_ph.image(disp_img, width=cw)
+
+        with col_draw:
+            st.caption("✏️ ここをなぞる（同じ縮尺）")
+            canvas_result = st_canvas(
+                stroke_width=brush_size,
+                stroke_color="rgba(255, 0, 0, 0.85)",
+                background_color="#f0f0f0",
+                drawing_mode="freedraw",
+                update_streamlit=True,
+                height=ch,
+                width=cw,
+                key=f"erase_canvas_{st.session_state['erase_reset']}",
+            )
+
+        # なぞったストロークを左の画像に赤くオーバーレイ
+        _objs = (canvas_result.json_data or {}).get("objects", [])
+        if _objs:
+            _ov = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
             _dov = ImageDraw.Draw(_ov)
-            for _obj in _erase_objects:
+            for _obj in _objs:
                 if _obj.get("type") != "path":
                     continue
                 _sw = max(1, int(_obj.get("strokeWidth", brush_size)))
@@ -927,8 +934,7 @@ with tab_erase:
                     _dov.ellipse([_x2-_r2, _y2-_r2, _x2+_r2, _y2+_r2],
                                  fill=(220, 30, 30, 200))
             _comp = Image.alpha_composite(disp_img.convert("RGBA"), _ov).convert("RGB")
-            preview_ph.image(_comp, width=disp_w,
-                             caption="🔴 赤い部分が消去されます")
+            preview_ph.image(_comp, width=cw)
 
         col_btn, col_reset = st.columns([3, 1])
         with col_reset:
@@ -948,8 +954,8 @@ with tab_erase:
                 st.warning("消去する範囲をなぞってから「消去する」を押してください。")
             else:
                 with st.spinner("消去中..."):
-                    # json_data のパスからマスクを作成（background_image があっても正確に動く）
-                    mask_img = Image.new("L", (disp_w, disp_h), 0)
+                    # キャンバスサイズで json_data パスからマスクを作成
+                    mask_img = Image.new("L", (cw, ch), 0)
                     draw_mask = ImageDraw.Draw(mask_img)
                     for obj in (canvas_result.json_data or {}).get("objects", []):
                         if obj.get("type") == "path":
@@ -969,13 +975,9 @@ with tab_erase:
                                 x, y = pts[0]
                                 draw_mask.ellipse([x-r, y-r, x+r, y+r], fill=255)
 
-                    # 元サイズにスケール
+                    # 元サイズにスケール（dilation なし → にじみ防止）
                     mask_orig = mask_img.resize((orig_w, orig_h), Image.NEAREST)
                     mask_arr = np.array(mask_orig)
-
-                    # マスクを少し膨張させて確実に文字をカバー
-                    kernel = np.ones((5, 5), np.uint8)
-                    mask_arr = cv2.dilate(mask_arr, kernel, iterations=2)
 
                     # インペインティング
                     img_arr = np.array(orig_img)
