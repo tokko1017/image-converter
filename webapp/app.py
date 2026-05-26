@@ -566,6 +566,10 @@ with tab_doc:
             <tr style="background:#faf5ff;"><td style="padding:6px 10px;">XLSX（Excel）</td><td style="padding:6px 10px;">→ PDF・CSV・JPEG・PNG・WebP</td></tr>
             <tr><td style="padding:6px 10px;">PPTX（PowerPoint）</td><td style="padding:6px 10px;">→ PDF・TXT・<strong>DOCX</strong>・JPEG・PNG・WebP</td></tr>
           </table>
+          <p style="color:#7c3aed;font-size:0.82rem;margin:10px 0 0;">
+            ※ PPTX→DOCX：画像・図形は含まれず、テキストのみ抽出されます。<br>
+            ※ PDF→DOCX：スキャンされたPDFは文字が画像のままになります。テキストPDFで精度が上がります。
+          </p>
         </div>
         """, unsafe_allow_html=True)
     else:
