@@ -28,12 +28,15 @@ div[data-baseweb="tab-list"] {
     gap: 4px;
 }
 button[data-baseweb="tab"] {
+    flex: 1 !important;
     font-size: 0.9rem !important;
     font-weight: 700 !important;
     padding: 10px 14px !important;
     border-radius: 14px !important;
     color: #7c3aed !important;
     background: transparent !important;
+    text-align: center !important;
+    justify-content: center !important;
 }
 button[data-baseweb="tab"]:hover { background: #ede9fe !important; }
 button[data-baseweb="tab"][aria-selected="true"] {
