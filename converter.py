@@ -55,6 +55,87 @@ def libreoffice_ok():
             pass
     return None
 
+def tesseract_path():
+    import shutil as _shutil
+    exe = _shutil.which("tesseract")
+    if exe:
+        return exe
+    default = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.isfile(default):
+        return default
+    return None
+
+def tesseract_ok():
+    return tesseract_path() is not None
+
+def bundled_tessdata_dir():
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+    d = os.path.join(base, "tessdata")
+    return d if os.path.isdir(d) else None
+
+def tesseract_langs():
+    langs = set()
+    exe = tesseract_path()
+    if exe:
+        try:
+            r = subprocess.run([exe, "--list-langs"], capture_output=True,
+                               timeout=5, creationflags=_NO_WIN)
+            out = (r.stdout + r.stderr).decode("utf-8", errors="ignore")
+            langs |= {ln.strip() for ln in out.splitlines()[1:] if ln.strip()}
+        except Exception:
+            pass
+    bundled = bundled_tessdata_dir()
+    if bundled:
+        for fn in os.listdir(bundled):
+            if fn.endswith(".traineddata"):
+                langs.add(fn[:-len(".traineddata")])
+    return langs
+
+def _run_tesseract(exe, img, lang, tessdata_dir=None, psm=None, want_conf=False, timeout=60):
+    """tesseract.exeを直接subprocessで呼び出す（パスにスペースや日本語を含んでいても安全）。"""
+    with tempfile.TemporaryDirectory() as td:
+        img_path = os.path.join(td, "page.png")
+        img.save(img_path, "PNG")
+        out_base = os.path.join(td, "out")
+        cmd = [exe, img_path, out_base, "-l", lang]
+        if psm is not None:
+            cmd += ["--psm", str(psm)]
+        if tessdata_dir:
+            cmd += ["--tessdata-dir", tessdata_dir]
+        if want_conf:
+            cmd += ["-c", "tessedit_create_tsv=1"]
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=_NO_WIN)
+        except Exception:
+            return (-1.0 if want_conf else "")
+        if want_conf:
+            tsv_path = out_base + ".tsv"
+            if not os.path.isfile(tsv_path):
+                return -1.0
+            vals = []
+            with open(tsv_path, encoding="utf-8", errors="replace") as f:
+                reader = csv.DictReader(f, delimiter="\t")
+                for row in reader:
+                    try:
+                        c = float(row.get("conf", -1))
+                        if c >= 0:
+                            vals.append(c)
+                    except (TypeError, ValueError):
+                        pass
+            return sum(vals) / len(vals) if vals else -1.0
+        else:
+            txt_path = out_base + ".txt"
+            if os.path.isfile(txt_path):
+                return Path(txt_path).read_text(encoding="utf-8", errors="replace")
+            return ""
+
+import re
+_CJK_GAP_RE = re.compile(r'(?<=[ぁ-んァ-ヶ一-龥々〆〤、。「」！？])\s+(?=[ぁ-んァ-ヶ一-龥々〆〤、。「」！？])')
+
+def clean_ocr_ja(text):
+    """Tesseractが日本語OCR時に文字間へ挿入する余分な空白を除去する。"""
+    return _CJK_GAP_RE.sub("", text)
+
 # ── ピル型ボタン（Canvas製） ──────────────────────────────────────────────────
 class PillBtn(tk.Canvas):
     def __init__(self, parent, text, cmd, height=46):
@@ -608,7 +689,7 @@ class DocTab(tk.Frame):
         "PDF":  "どの端末でも同じレイアウトで開ける",
         "TXT":  "テキストを抽出してプレーンテキストで保存",
         "CSV":  "Excel・スプレッドシートで開けるデータ形式",
-        "DOCX": "Word文書として開ける",
+        "DOCX": "Word文書として開ける（スキャン画像PDFはOCRで文字認識）",
         "PPTX": "PDFの各ページをスライドとして画像化",
         "JPEG": "ページごとに画像化（JPEG）",
         "PNG":  "ページごとに画像化（PNG）",
@@ -798,8 +879,20 @@ class DocTab(tk.Frame):
                 elif fmt == "DOCX":
                     op = dest_dir / (stem + ".docx")
                     if ext == "pdf":
-                        from pdf2docx import Converter
-                        cv = Converter(inp); cv.convert(str(op)); cv.close()
+                        if self._pdf_is_scanned(inp):
+                            if not tesseract_ok():
+                                self.after(0, lambda: messagebox.showerror(
+                                    "エラー",
+                                    "このPDFは文字情報を持たないスキャン画像PDFのため、"
+                                    "OCR（文字認識）が必要です。\n"
+                                    "Tesseract-OCRがインストールされていないため変換できません。"))
+                                return
+                            self.after(0, lambda: self._log(
+                                "📷 スキャン画像PDFを検出しました。OCRで文字認識します..."))
+                            self._pdf_to_docx_ocr(inp, op)
+                        else:
+                            from pdf2docx import Converter
+                            cv = Converter(inp); cv.convert(str(op)); cv.close()
                     elif ext == "pptx":
                         from pptx import Presentation
                         from docx import Document
@@ -876,6 +969,57 @@ class DocTab(tk.Frame):
                 lines.append("")
             return "\n".join(lines)
         return ""
+
+    def _pdf_is_scanned(self, inp, threshold=20):
+        import fitz
+        doc = fitz.open(inp)
+        n = min(len(doc), 3)
+        total_chars = sum(len(doc[i].get_text().strip()) for i in range(n))
+        doc.close()
+        return (total_chars / max(n, 1)) < threshold
+
+    def _ocr_page_text(self, exe, img, langs_available):
+        bundled = bundled_tessdata_dir()
+        vert_dir = bundled if bundled and os.path.isfile(
+            os.path.join(bundled, "jpn_vert.traineddata")) else None
+        candidates = []
+        conf_h = _run_tesseract(exe, img, "jpn", want_conf=True)
+        candidates.append((conf_h, "jpn", None, None))
+        if "jpn_vert" in langs_available:
+            conf_v = _run_tesseract(exe, img, "jpn_vert", tessdata_dir=vert_dir, psm=5, want_conf=True)
+            candidates.append((conf_v, "jpn_vert", vert_dir, 5))
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        _, lang, tessdata_dir, psm = candidates[0]
+        return _run_tesseract(exe, img, lang, tessdata_dir=tessdata_dir, psm=psm)
+
+    def _pdf_to_docx_ocr(self, inp, out_path):
+        import fitz
+        from docx import Document
+        exe = tesseract_path()
+        langs_available = tesseract_langs()
+        if "jpn_vert" not in langs_available:
+            self.after(0, lambda: self._log(
+                "⚠️ jpn_vert（縦書き用言語データ）が未インストールのため、"
+                "縦書き文書は認識精度が下がる場合があります。"))
+        doc  = fitz.open(inp)
+        matrix = fitz.Matrix(300 / 72, 300 / 72)
+        wdoc = Document()
+        total = len(doc)
+        for i, page in enumerate(doc):
+            self.after(0, lambda i=i, t=total: self._log(f"OCR処理中... {i+1} / {t} ページ"))
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            text = self._ocr_page_text(exe, img, langs_available)
+            lines = [clean_ocr_ja(ln.strip()) for ln in text.splitlines() if ln.strip()]
+            if lines:
+                for line in lines:
+                    wdoc.add_paragraph(line)
+            else:
+                wdoc.add_paragraph("")
+            if i < total - 1:
+                wdoc.add_page_break()
+        doc.close()
+        wdoc.save(str(out_path))
 
     def _pdf_to_pptx(self, inp, out_path, dpi):
         import fitz

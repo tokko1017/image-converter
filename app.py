@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import os
 import csv
+import re
 from pathlib import Path
 
 pillow_heif.register_heif_opener()
@@ -388,7 +389,7 @@ with tab_doc:
         "PDF":  "どの端末でも同じレイアウトで開ける",
         "TXT":  "テキストを抽出してプレーンテキストで保存",
         "CSV":  "Excel・スプレッドシートで開けるデータ形式",
-        "DOCX": "Word文書として開ける（文字・表・レイアウトを可能な範囲で再現）",
+        "DOCX": "Word文書として開ける（スキャン画像PDFはOCRで文字認識）",
         "PPTX": "PDFの各ページをスライドとして画像化・PowerPointで開ける",
         "JPEG": "ページ・スライドごとに画像化（写真向け・高互換）",
         "PNG":  "ページ・スライドごとに画像化（高品質・透過対応）",
@@ -445,6 +446,105 @@ with tab_doc:
         cv = Converter(input_path)
         cv.convert(str(out))
         cv.close()
+        return out
+
+    def pdf_is_scanned(input_path, threshold=20):
+        import fitz
+        doc = fitz.open(input_path)
+        n = min(len(doc), 3)
+        total_chars = sum(len(doc[i].get_text().strip()) for i in range(n))
+        doc.close()
+        return (total_chars / max(n, 1)) < threshold
+
+    def tesseract_available():
+        try:
+            return subprocess.run(["tesseract", "--version"], capture_output=True, timeout=5).returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+    def tesseract_langs():
+        try:
+            r = subprocess.run(["tesseract", "--list-langs"], capture_output=True, timeout=5)
+            out = (r.stdout + r.stderr).decode("utf-8", errors="ignore")
+            return {ln.strip() for ln in out.splitlines()[1:] if ln.strip()}
+        except Exception:
+            return set()
+
+    _CJK_GAP_RE = re.compile(r'(?<=[ぁ-んァ-ヶ一-龥々〆〤、。「」！？])\s+(?=[ぁ-んァ-ヶ一-龥々〆〤、。「」！？])')
+
+    def clean_ocr_ja(text):
+        """Tesseractが日本語OCR時に文字間へ挿入する余分な空白を除去する。"""
+        return _CJK_GAP_RE.sub("", text)
+
+    def run_tesseract(img, lang, psm=None, want_conf=False, timeout=60):
+        with tempfile.TemporaryDirectory() as td:
+            img_path = os.path.join(td, "page.png")
+            img.save(img_path, "PNG")
+            out_base = os.path.join(td, "out")
+            cmd = ["tesseract", img_path, out_base, "-l", lang]
+            if psm is not None:
+                cmd += ["--psm", str(psm)]
+            if want_conf:
+                cmd += ["-c", "tessedit_create_tsv=1"]
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=timeout)
+            except Exception:
+                return -1.0 if want_conf else ""
+            if want_conf:
+                tsv_path = out_base + ".tsv"
+                if not os.path.isfile(tsv_path):
+                    return -1.0
+                vals = []
+                with open(tsv_path, encoding="utf-8", errors="replace") as f:
+                    reader = csv.DictReader(f, delimiter="\t")
+                    for row in reader:
+                        try:
+                            c = float(row.get("conf", -1))
+                            if c >= 0:
+                                vals.append(c)
+                        except (TypeError, ValueError):
+                            pass
+                return sum(vals) / len(vals) if vals else -1.0
+            else:
+                txt_path = out_base + ".txt"
+                if os.path.isfile(txt_path):
+                    return Path(txt_path).read_text(encoding="utf-8", errors="replace")
+                return ""
+
+    def ocr_page_text(img, langs_available):
+        candidates = []
+        conf_h = run_tesseract(img, "jpn", want_conf=True)
+        candidates.append((conf_h, "jpn", None))
+        if "jpn_vert" in langs_available:
+            conf_v = run_tesseract(img, "jpn_vert", psm=5, want_conf=True)
+            candidates.append((conf_v, "jpn_vert", 5))
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        _, lang, psm = candidates[0]
+        return run_tesseract(img, lang, psm=psm)
+
+    def pdf_to_docx_ocr_file(input_path, tmpdir):
+        import fitz
+        from docx import Document
+        langs_available = tesseract_langs()
+        doc = fitz.open(input_path)
+        matrix = fitz.Matrix(300 / 72, 300 / 72)
+        wdoc = Document()
+        total = len(doc)
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            text = ocr_page_text(img, langs_available)
+            lines = [clean_ocr_ja(ln.strip()) for ln in text.splitlines() if ln.strip()]
+            if lines:
+                for line in lines:
+                    wdoc.add_paragraph(line)
+            else:
+                wdoc.add_paragraph("")
+            if i < total - 1:
+                wdoc.add_page_break()
+        doc.close()
+        out = Path(tmpdir) / "output.docx"
+        wdoc.save(str(out))
         return out
 
     def txt_to_docx_file(input_path, tmpdir):
@@ -569,7 +669,7 @@ with tab_doc:
           </table>
           <p style="color:#7c3aed;font-size:0.82rem;margin:10px 0 0;">
             ※ PPTX→DOCX：画像・図形は含まれず、テキストのみ抽出されます。<br>
-            ※ PDF→DOCX：スキャンされたPDFは文字が画像のままになります。テキストPDFで精度が上がります。
+            ※ PDF→DOCX：スキャン画像PDFはOCRで自動的に文字認識してからWordに書き込みます（横書き・縦書き両対応）。
           </p>
         </div>
         """, unsafe_allow_html=True)
@@ -624,25 +724,35 @@ with tab_doc:
                                     else:
                                         st.warning("テキストが抽出できませんでした。スキャンされたPDFなどは対応できません。")
                                 elif out_fmt == "DOCX":
+                                    ocr_failed = False
                                     if ext == "pdf":
-                                        out_path = pdf_to_docx_file(input_path, tmpdir)
-                                        extra_note = "💡 スキャンされたPDFは文字が画像のままになります。テキストPDFで精度が上がります。"
+                                        if pdf_is_scanned(input_path):
+                                            if not tesseract_available():
+                                                st.error("このPDFは文字情報を持たないスキャン画像PDFのため、OCR（文字認識）が必要ですが、サーバー側にTesseract-OCRが導入されていないため変換できません。")
+                                                ocr_failed = True
+                                            else:
+                                                out_path = pdf_to_docx_ocr_file(input_path, tmpdir)
+                                                extra_note = "📷 スキャン画像PDFを検出したため、OCRで文字認識してWordに書き込みました。多少の認識誤りが発生する場合があります。"
+                                        else:
+                                            out_path = pdf_to_docx_file(input_path, tmpdir)
+                                            extra_note = "💡 スキャンされたPDFは文字が画像のままになります。テキストPDFで精度が上がります。"
                                     elif ext == "pptx":
                                         out_path = pptx_to_docx_file(input_path, tmpdir)
                                         extra_note = "💡 画像・図形は含まれません。スライド内のテキストのみ抽出されます。"
                                     else:
                                         out_path = txt_to_docx_file(input_path, tmpdir)
                                         extra_note = None
-                                    out_name = Path(uploaded_doc.name).stem + ".docx"
-                                    st.success(f"🎉 {out_name} の変換が完了しました！")
-                                    if extra_note:
-                                        st.info(extra_note)
-                                    st.download_button(
-                                        f"⬇️ ダウンロード：{out_name}",
-                                        data=out_path.read_bytes(),
-                                        file_name=out_name,
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    )
+                                    if not ocr_failed:
+                                        out_name = Path(uploaded_doc.name).stem + ".docx"
+                                        st.success(f"🎉 {out_name} の変換が完了しました！")
+                                        if extra_note:
+                                            st.info(extra_note)
+                                        st.download_button(
+                                            f"⬇️ ダウンロード：{out_name}",
+                                            data=out_path.read_bytes(),
+                                            file_name=out_name,
+                                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                        )
                                 elif out_fmt == "PPTX":
                                     out_path = pdf_to_pptx(input_path, tmpdir, dpi)
                                     out_name = Path(uploaded_doc.name).stem + ".pptx"

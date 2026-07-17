@@ -1,3 +1,6 @@
 ffmpeg
 libreoffice
 fonts-noto-cjk
+tesseract-ocr
+tesseract-ocr-jpn
+tesseract-ocr-jpn-vert
