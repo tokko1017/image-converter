@@ -947,6 +947,14 @@ class DocTab(tk.Frame):
 
     def _extract_text(self, path, ext):
         if ext == "pdf":
+            if self._pdf_is_scanned(path):
+                if not tesseract_ok():
+                    raise RuntimeError(
+                        "このPDFは文字情報を持たないスキャン画像PDFのため、OCR（文字認識）が必要です。"
+                        "Tesseract-OCRがインストールされていないため変換できません。")
+                self.after(0, lambda: self._log(
+                    "📷 スキャン画像PDFを検出しました。OCRで文字認識します..."))
+                return self._pdf_ocr_text(path)
             import pdfplumber
             parts = []
             with pdfplumber.open(path) as pdf:
@@ -992,18 +1000,16 @@ class DocTab(tk.Frame):
         _, lang, tessdata_dir, psm = candidates[0]
         return _run_tesseract(exe, img, lang, tessdata_dir=tessdata_dir, psm=psm)
 
-    def _pdf_to_docx_ocr(self, inp, out_path):
+    def _iter_ocr_pages(self, inp):
         import fitz
-        from docx import Document
         exe = tesseract_path()
         langs_available = tesseract_langs()
         if "jpn_vert" not in langs_available:
             self.after(0, lambda: self._log(
                 "⚠️ jpn_vert（縦書き用言語データ）が未インストールのため、"
                 "縦書き文書は認識精度が下がる場合があります。"))
-        doc  = fitz.open(inp)
+        doc = fitz.open(inp)
         matrix = fitz.Matrix(300 / 72, 300 / 72)
-        wdoc = Document()
         total = len(doc)
         for i, page in enumerate(doc):
             self.after(0, lambda i=i, t=total: self._log(f"OCR処理中... {i+1} / {t} ページ"))
@@ -1011,6 +1017,16 @@ class DocTab(tk.Frame):
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             text = self._ocr_page_text(exe, img, langs_available)
             lines = [clean_ocr_ja(ln.strip()) for ln in text.splitlines() if ln.strip()]
+            yield i, total, lines
+        doc.close()
+
+    def _pdf_ocr_text(self, inp):
+        return "\n\n".join("\n".join(lines) for _, _, lines in self._iter_ocr_pages(inp))
+
+    def _pdf_to_docx_ocr(self, inp, out_path):
+        from docx import Document
+        wdoc = Document()
+        for i, total, lines in self._iter_ocr_pages(inp):
             if lines:
                 for line in lines:
                     wdoc.add_paragraph(line)
@@ -1018,7 +1034,6 @@ class DocTab(tk.Frame):
                 wdoc.add_paragraph("")
             if i < total - 1:
                 wdoc.add_page_break()
-        doc.close()
         wdoc.save(str(out_path))
 
     def _pdf_to_pptx(self, inp, out_path, dpi):

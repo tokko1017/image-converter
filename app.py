@@ -603,9 +603,28 @@ with tab_doc:
         doc.close()
         return images, None
 
+    def pdf_ocr_text(input_path):
+        import fitz
+        langs_available = tesseract_langs()
+        doc = fitz.open(input_path)
+        matrix = fitz.Matrix(300 / 72, 300 / 72)
+        pages = []
+        for page in doc:
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            text = ocr_page_text(img, langs_available)
+            lines = [clean_ocr_ja(ln.strip()) for ln in text.splitlines() if ln.strip()]
+            pages.append("\n".join(lines))
+        doc.close()
+        return "\n\n".join(pages)
+
     def extract_text(input_path):
         ext = Path(input_path).suffix.lower()
         if ext == ".pdf":
+            if pdf_is_scanned(input_path):
+                if not tesseract_available():
+                    raise RuntimeError("このPDFは文字情報を持たないスキャン画像PDFのため、OCR（文字認識）が必要ですが、サーバー側にTesseract-OCRが導入されていないため変換できません。")
+                return pdf_ocr_text(input_path)
             import pdfplumber
             parts = []
             with pdfplumber.open(input_path) as pdf:
@@ -722,7 +741,7 @@ with tab_doc:
                                                            file_name=out_stem + ".txt",
                                                            mime="text/plain")
                                     else:
-                                        st.warning("テキストが抽出できませんでした。スキャンされたPDFなどは対応できません。")
+                                        st.warning("テキストが抽出できませんでした。")
                                 elif out_fmt == "DOCX":
                                     ocr_failed = False
                                     if ext == "pdf":
