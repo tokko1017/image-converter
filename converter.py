@@ -690,7 +690,7 @@ class DocTab(tk.Frame):
         "TXT":  "テキストを抽出してプレーンテキストで保存",
         "CSV":  "Excel・スプレッドシートで開けるデータ形式",
         "DOCX": "Word文書として開ける（スキャン画像PDFはOCRで文字認識）",
-        "PPTX": "PDFの各ページをスライドとして画像化",
+        "PPTX": "PDFの各ページをスライドとしてテキスト化（スキャン画像PDFはOCR）",
         "JPEG": "ページごとに画像化（JPEG）",
         "PNG":  "ページごとに画像化（PNG）",
         "WebP": "ページごとに画像化（WebP）",
@@ -798,7 +798,7 @@ class DocTab(tk.Frame):
         fmt = self.out_format.get()
         note = self.FORMAT_NOTES.get(fmt, "")
         self.fmt_note.config(text=f"📌 {note}" if note else "", fg=MID)
-        if fmt in ("JPEG", "PNG", "WebP", "PPTX"):
+        if fmt in ("JPEG", "PNG", "WebP"):
             self.dpi_frame.pack(fill="x")
         else:
             self.dpi_frame.pack_forget()
@@ -918,7 +918,14 @@ class DocTab(tk.Frame):
                                                   messagebox.showinfo("完了", f"🎉 保存先: {op}")))
                 elif fmt == "PPTX":
                     op = dest_dir / (stem + ".pptx")
-                    self._pdf_to_pptx(inp, op, dpi)
+                    if self._pdf_is_scanned(inp) and not tesseract_ok():
+                        self.after(0, lambda: messagebox.showerror(
+                            "エラー",
+                            "このPDFは文字情報を持たないスキャン画像PDFのため、"
+                            "OCR（文字認識）が必要です。\n"
+                            "Tesseract-OCRがインストールされていないため変換できません。"))
+                        return
+                    self._pdf_to_pptx(inp, op)
                     self.after(0, lambda op=op: (self._log(f"✅ 完了: {op.name}"),
                                                   messagebox.showinfo("完了", f"🎉 保存先: {op}")))
                 elif fmt in ("JPEG", "PNG", "WebP"):
@@ -1036,26 +1043,43 @@ class DocTab(tk.Frame):
                 wdoc.add_page_break()
         wdoc.save(str(out_path))
 
-    def _pdf_to_pptx(self, inp, out_path, dpi):
+    def _pdf_to_pptx(self, inp, out_path):
         import fitz
         from pptx import Presentation
-        from pptx.util import Inches
+        from pptx.util import Inches, Pt
         doc = fitz.open(inp)
         prs = Presentation()
         if len(doc) > 0:
             r = doc[0].rect
             prs.slide_width  = Inches(r.width  / 72)
             prs.slide_height = Inches(r.height / 72)
-        matrix = fitz.Matrix(dpi / 72, dpi / 72)
-        blank  = prs.slide_layouts[6]
-        for page in doc:
-            pix = page.get_pixmap(matrix=matrix, alpha=False)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            buf = io.BytesIO(); img.save(buf, "PNG"); buf.seek(0)
-            slide = prs.slides.add_slide(blank)
-            slide.shapes.add_picture(buf, 0, 0,
-                                     width=prs.slide_width, height=prs.slide_height)
+        total = len(doc)
         doc.close()
+
+        if self._pdf_is_scanned(inp):
+            self.after(0, lambda: self._log(
+                "📷 スキャン画像PDFを検出しました。OCRで文字認識します..."))
+            page_texts = ["\n".join(lines) for _, _, lines in self._iter_ocr_pages(inp)]
+        else:
+            import pdfplumber
+            with pdfplumber.open(inp) as pdf:
+                page_texts = [(p.extract_text() or "") for p in pdf.pages]
+
+        blank = prs.slide_layouts[6]
+        margin = Inches(0.4)
+        for i in range(total):
+            slide = prs.slides.add_slide(blank)
+            tb = slide.shapes.add_textbox(
+                margin, margin, prs.slide_width - margin * 2, prs.slide_height - margin * 2)
+            tf = tb.text_frame
+            tf.word_wrap = True
+            lines = [ln for ln in page_texts[i].splitlines() if ln.strip()] or [""]
+            tf.text = lines[0]
+            tf.paragraphs[0].font.size = Pt(18)
+            for ln in lines[1:]:
+                p = tf.add_paragraph()
+                p.text = ln
+                p.font.size = Pt(18)
         prs.save(str(out_path))
 
     def _to_images(self, inp, ext, fmt, dpi, tmp):

@@ -390,7 +390,7 @@ with tab_doc:
         "TXT":  "テキストを抽出してプレーンテキストで保存",
         "CSV":  "Excel・スプレッドシートで開けるデータ形式",
         "DOCX": "Word文書として開ける（スキャン画像PDFはOCRで文字認識）",
-        "PPTX": "PDFの各ページをスライドとして画像化・PowerPointで開ける",
+        "PPTX": "PDFの各ページをスライドとしてテキスト化・PowerPointで開ける（スキャン画像PDFはOCR）",
         "JPEG": "ページ・スライドごとに画像化（写真向け・高互換）",
         "PNG":  "ページ・スライドごとに画像化（高品質・透過対応）",
         "WebP": "ページ・スライドごとに画像化（Web向け・軽量）",
@@ -413,29 +413,51 @@ with tab_doc:
             return out, None
         return None, result.stderr.decode("utf-8", errors="replace")
 
-    def pdf_to_pptx(input_path, tmpdir, dpi=150):
+    def pdf_to_pptx(input_path, tmpdir):
         import fitz
         from pptx import Presentation
-        from pptx.util import Inches
+        from pptx.util import Inches, Pt
         doc = fitz.open(input_path)
         prs = Presentation()
         if len(doc) > 0:
             r = doc[0].rect
             prs.slide_width  = Inches(r.width  / 72)
             prs.slide_height = Inches(r.height / 72)
-        matrix = fitz.Matrix(dpi / 72, dpi / 72)
-        blank = prs.slide_layouts[6]
-        for page in doc:
-            pix = page.get_pixmap(matrix=matrix, alpha=False)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            buf = io.BytesIO()
-            img.save(buf, "PNG")
-            buf.seek(0)
-            slide = prs.slides.add_slide(blank)
-            slide.shapes.add_picture(buf, 0, 0,
-                                     width=prs.slide_width,
-                                     height=prs.slide_height)
+        total = len(doc)
         doc.close()
+
+        if pdf_is_scanned(input_path):
+            langs_available = tesseract_langs()
+            page_texts = []
+            fitz_doc = fitz.open(input_path)
+            matrix = fitz.Matrix(300 / 72, 300 / 72)
+            for page in fitz_doc:
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                text = ocr_page_text(img, langs_available)
+                lines = [clean_ocr_ja(ln.strip()) for ln in text.splitlines() if ln.strip()]
+                page_texts.append("\n".join(lines))
+            fitz_doc.close()
+        else:
+            import pdfplumber
+            with pdfplumber.open(input_path) as pdf:
+                page_texts = [(p.extract_text() or "") for p in pdf.pages]
+
+        blank = prs.slide_layouts[6]
+        margin = Inches(0.4)
+        for i in range(total):
+            slide = prs.slides.add_slide(blank)
+            tb = slide.shapes.add_textbox(
+                margin, margin, prs.slide_width - margin * 2, prs.slide_height - margin * 2)
+            tf = tb.text_frame
+            tf.word_wrap = True
+            lines = [ln for ln in page_texts[i].splitlines() if ln.strip()] or [""]
+            tf.text = lines[0]
+            tf.paragraphs[0].font.size = Pt(18)
+            for ln in lines[1:]:
+                p = tf.add_paragraph()
+                p.text = ln
+                p.font.size = Pt(18)
         out = Path(tmpdir) / "output.pptx"
         prs.save(str(out))
         return out
@@ -706,7 +728,7 @@ with tab_doc:
             out_fmt = st.selectbox("✨ 変換後の形式", available_outputs, key="doc_out_fmt")
             st.markdown(format_badge(out_fmt, FORMAT_NOTES[out_fmt]), unsafe_allow_html=True)
             dpi = 150
-            if out_fmt in ("JPEG", "PNG", "WebP", "PPTX"):
+            if out_fmt in ("JPEG", "PNG", "WebP"):
                 dpi = st.select_slider("🖨️ 解像度 (DPI)", options=[96, 150, 300], value=150,
                                        help="96=画面向け・150=標準・300=印刷品質", key="doc_dpi")
             st.divider()
@@ -773,15 +795,18 @@ with tab_doc:
                                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                         )
                                 elif out_fmt == "PPTX":
-                                    out_path = pdf_to_pptx(input_path, tmpdir, dpi)
-                                    out_name = Path(uploaded_doc.name).stem + ".pptx"
-                                    st.success(f"🎉 {out_name} の変換が完了しました！")
-                                    st.download_button(
-                                        f"⬇️ ダウンロード：{out_name}",
-                                        data=out_path.read_bytes(),
-                                        file_name=out_name,
-                                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                    )
+                                    if pdf_is_scanned(input_path) and not tesseract_available():
+                                        st.error("このPDFは文字情報を持たないスキャン画像PDFのため、OCR（文字認識）が必要ですが、サーバー側にTesseract-OCRが導入されていないため変換できません。")
+                                    else:
+                                        out_path = pdf_to_pptx(input_path, tmpdir)
+                                        out_name = Path(uploaded_doc.name).stem + ".pptx"
+                                        st.success(f"🎉 {out_name} の変換が完了しました！")
+                                        st.download_button(
+                                            f"⬇️ ダウンロード：{out_name}",
+                                            data=out_path.read_bytes(),
+                                            file_name=out_name,
+                                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                        )
                                 elif out_fmt == "CSV":
                                     st.success("🎉 変換が完了しました！")
                                     st.download_button(f"⬇️ ダウンロード：{out_stem}.csv",
